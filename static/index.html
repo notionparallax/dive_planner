@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dive Planner</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>🤿 Dive Planner</h1>
+      <p class="subtitle">Bühlmann ZH-L16B-GF Decompression Calculator</p>
+    </header>
+
+    <main>
+      <!-- Tab switcher -->
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="plan">Plan a Dive</button>
+        <button class="tab-btn" data-tab="optimise">Optimise Bottom Time</button>
+        <button class="tab-btn" data-tab="full">Optimise Mix</button>
+      </div>
+
+      <form id="plan-form">
+
+        <!-- Shared: Top row: Dive params, planning mode, SAC rates -->
+        <div class="form-grid form-grid-top">
+
+          <fieldset id="fs-dive-params">
+            <legend>Dive Parameters</legend>
+            <div class="field-row">
+              <label for="depth" data-tooltip="Maximum depth of the dive in metres">Depth (m)</label>
+              <input type="number" id="depth" name="depth" value="45" min="1" max="200" step="1" required />
+            </div>
+            <!-- Plan-only: bottom time -->
+            <div class="field-row plan-only">
+              <label for="bottom_time" data-tooltip="Time spent at maximum depth before starting ascent, in minutes">Bottom Time (min)</label>
+              <input type="number" id="bottom_time" name="bottom_time" value="27" min="1" max="300" step="1" />
+            </div>
+            <div class="field-row">
+              <label for="gf_low" data-tooltip="Gradient Factor Low: controls when deco stops begin. Lower = more conservative first stop (deeper). Typical range 30–60">GF Low</label>
+              <input type="number" id="gf_low" name="gf_low" value="50" min="10" max="100" step="5" />
+            </div>
+            <div class="field-row">
+              <label for="gf_high" data-tooltip="Gradient Factor High: controls allowed supersaturation at the surface. Lower = more conservative final stop. Typical range 70–90">GF High</label>
+              <input type="number" id="gf_high" name="gf_high" value="70" min="10" max="100" step="5" />
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Planning Mode</legend>
+            <div class="field-row">
+              <label for="dive_mode" data-tooltip="Cave: uses Rule of Thirds (turn at 1/3 of gas). Open Water: calculates minimum gas for 2-diver rescue ascent">Dive Mode</label>
+              <select id="dive_mode" name="dive_mode">
+                <option value="cave" selected>Cave (Rule of Thirds)</option>
+                <option value="open_water">Open Water (Min Gas)</option>
+              </select>
+            </div>
+            <!-- Plan-only: deco gases lost -->
+            <div class="field-row plan-only">
+              <label for="deco_gases_lost" data-tooltip="Simulate a lost deco gas scenario to see the worst-case deco obligation">Deco Gases Lost</label>
+              <select id="deco_gases_lost" name="deco_gases_lost">
+                <option value="false" selected>None lost</option>
+                <option value="ean50">Deco 1 lost</option>
+                <option value="o2">Deco 2 lost</option>
+                <option value="true">All deco lost</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="contingency" data-tooltip="Multiply minimum gas requirements by this factor for extra safety margin. 1.0 = no contingency, 1.2 = 20% extra">Contingency Factor</label>
+              <input type="number" id="contingency" name="contingency" value="1.0" min="1.0" max="2.0" step="0.1" />
+            </div>
+            <div class="field-row">
+              <label for="practical_empty_bar" data-tooltip="The minimum gauge reading you would ever accept on a cylinder. Gauges are inaccurate, so gas below this pressure is treated as unavailable. Default 20 bar.">Practical Empty (bar)</label>
+              <input type="number" id="practical_empty_bar" name="practical_empty_bar" value="20" min="0" max="50" step="5" />
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>SAC Rates &amp; ppO₂ Limits</legend>
+            <div class="field-row">
+              <label for="sac_bottom" data-tooltip="Surface Air Consumption at the bottom: litres per minute at surface pressure. Typical range 15–25 L/min">Bottom SAC (L/min)</label>
+              <input type="number" id="sac_bottom" name="sac_bottom" value="20" min="5" max="60" step="1" />
+            </div>
+            <div class="field-row">
+              <label for="sac_deco" data-tooltip="Surface Air Consumption during deco stops: usually lower than bottom SAC as you're resting. Typical 12–18 L/min">Deco SAC (L/min)</label>
+              <input type="number" id="sac_deco" name="sac_deco" value="15" min="5" max="60" step="1" />
+            </div>
+            <div class="field-row">
+              <label for="sac_emergency" data-tooltip="SAC rate used for minimum gas calculations — assumes stressed/elevated breathing during an emergency. Default 30 L/min">Emergency SAC (L/min)</label>
+              <input type="number" id="sac_emergency" name="sac_emergency" value="30" min="10" max="100" step="5" />
+            </div>
+            <div class="field-row">
+              <label for="max_ppo2_bottom" data-tooltip="Maximum partial pressure of oxygen at the bottom. WKPP/GUE standard: 1.4 bar. Higher values increase CNS oxygen toxicity risk">Max ppO₂ Bottom (bar)</label>
+              <input type="number" id="max_ppo2_bottom" name="max_ppo2_bottom" value="1.4" min="0.5" max="1.6" step="0.1" />
+            </div>
+            <div class="field-row">
+              <label for="max_ppo2_deco" data-tooltip="Maximum ppO₂ during deco stops. 1.6 bar is the standard deco limit. Used to auto-calculate optimal deco gas switch depths">Max ppO₂ Deco (bar)</label>
+              <input type="number" id="max_ppo2_deco" name="max_ppo2_deco" value="1.6" min="0.5" max="1.6" step="0.1" />
+            </div>
+          </fieldset>
+
+        </div>
+
+        <!-- Shared: Bottom row: Gases -->
+        <div class="form-grid form-grid-gases">
+
+          <fieldset>
+            <legend>Back Gas</legend>
+            <div class="field-row">
+              <label for="back_gas_o2" data-tooltip="Oxygen percentage of the back gas mix. For trimix dives keep ppO₂ ≤ 1.4 bar at max depth">O₂ %</label>
+              <input type="number" id="back_gas_o2" name="back_gas_o2" value="23" min="5" max="100" step="1" />
+            </div>
+            <div class="field-row">
+              <label for="back_gas_he" data-tooltip="Helium percentage of the back gas mix. Reduces narcosis and work of breathing at depth. Set to 0 for nitrox">He %</label>
+              <input type="number" id="back_gas_he" name="back_gas_he" value="25" min="0" max="90" step="1" />
+            </div>
+            <div class="field-row">
+              <label for="back_gas_volume_l" data-tooltip="Internal volume of the back gas cylinder(s) in litres. Twin 12L = 24L, twin 10L = 20L, etc.">Volume (L)</label>
+              <input type="number" id="back_gas_volume_l" name="back_gas_volume_l" value="24.4" min="1" max="100" step="0.1" />
+            </div>
+            <div class="field-row">
+              <label for="back_gas_fill_bar" data-tooltip="Pressure the cylinder was filled to, in bar. This is the starting pressure before the dive">Fill Pressure (bar)</label>
+              <input type="number" id="back_gas_fill_bar" name="back_gas_fill_bar" value="210" min="50" max="300" step="10" />
+            </div>
+          </fieldset>
+
+          <fieldset id="fs-deco1">
+            <legend>
+              <label class="gas-toggle" data-tooltip="Enable or disable this deco gas. When disabled it will not be used in the plan">
+                <input type="checkbox" id="deco1_enabled" checked />
+                Deco Gas 1
+              </label>
+            </legend>
+            <div class="field-row">
+              <label for="deco1_o2" data-tooltip="Oxygen percentage of Deco Gas 1. Typically EAN50 (50% O₂). Must give ppO₂ ≤ deco limit at switch depth">O₂ %</label>
+              <input type="number" id="deco1_o2" name="deco1_o2" value="50" min="21" max="100" step="1" />
+            </div>
+            <div class="field-row">
+              <label for="deco1_he" data-tooltip="Helium percentage of Deco Gas 1. Usually 0% for a standard EAN50 deco mix">He %</label>
+              <input type="number" id="deco1_he" name="deco1_he" value="0" min="0" max="50" step="1" />
+            </div>
+            <div class="field-row">
+              <label for="deco1_volume_l" data-tooltip="Internal volume of the Deco Gas 1 cylinder in litres">Volume (L)</label>
+              <input type="number" id="deco1_volume_l" name="deco1_volume_l" value="11.1" min="1" max="50" step="0.1" />
+            </div>
+            <div class="field-row">
+              <label for="deco1_fill_bar" data-tooltip="Pressure the Deco Gas 1 cylinder was filled to, in bar">Fill Pressure (bar)</label>
+              <input type="number" id="deco1_fill_bar" name="deco1_fill_bar" value="150" min="50" max="300" step="10" />
+            </div>
+            <div class="field-row">
+              <label for="deco1_switch_depth_m" data-tooltip="Depth to switch to this gas, in metres. Leave blank to auto-calculate from the max ppO₂ deco limit">Switch Depth (m)</label>
+              <input type="number" id="deco1_switch_depth_m" name="deco1_switch_depth_m" placeholder="Auto" min="3" max="40" step="1" />
+            </div>
+          </fieldset>
+
+          <fieldset id="fs-deco2">
+            <legend>
+              <label class="gas-toggle" data-tooltip="Enable or disable this deco gas. When disabled it will not be used in the plan">
+                <input type="checkbox" id="deco2_enabled" checked />
+                Deco Gas 2
+              </label>
+            </legend>
+            <div class="field-row">
+              <label for="deco2_o2" data-tooltip="Oxygen percentage of Deco Gas 2. Typically 100% O₂ for the shallow deco stop">O₂ %</label>
+              <input type="number" id="deco2_o2" name="deco2_o2" value="100" min="21" max="100" step="1" />
+            </div>
+            <div class="field-row">
+              <label for="deco2_he" data-tooltip="Helium percentage of Deco Gas 2. Normally 0% for a pure O₂ deco stage">He %</label>
+              <input type="number" id="deco2_he" name="deco2_he" value="0" min="0" max="50" step="1" />
+            </div>
+            <div class="field-row">
+              <label for="deco2_volume_l" data-tooltip="Internal volume of the Deco Gas 2 cylinder in litres">Volume (L)</label>
+              <input type="number" id="deco2_volume_l" name="deco2_volume_l" value="11.1" min="1" max="50" step="0.1" />
+            </div>
+            <div class="field-row">
+              <label for="deco2_fill_bar" data-tooltip="Pressure the Deco Gas 2 cylinder was filled to, in bar">Fill Pressure (bar)</label>
+              <input type="number" id="deco2_fill_bar" name="deco2_fill_bar" value="150" min="50" max="300" step="10" />
+            </div>
+            <div class="field-row">
+              <label for="deco2_switch_depth_m" data-tooltip="Depth to switch to this gas, in metres. Leave blank to auto-calculate from the max ppO₂ deco limit">Switch Depth (m)</label>
+              <input type="number" id="deco2_switch_depth_m" name="deco2_switch_depth_m" placeholder="Auto" min="3" max="20" step="1" />
+            </div>
+          </fieldset>
+
+        </div>
+
+        <!-- Tab panels for action buttons and tab-specific inputs -->
+        <div id="tab-plan" class="tab-panel active">
+          <div class="form-actions">
+            <button type="button" id="submit-btn" onclick="submitPlan()">Calculate Dive Plan</button>
+          </div>
+        </div>
+
+        <div id="tab-optimise" class="tab-panel">
+          <div class="form-grid form-grid-top" style="margin-top:0">
+            <fieldset>
+              <legend>Constraint Limits</legend>
+              <div class="field-row">
+                <label for="max_cns" data-tooltip="Maximum CNS oxygen toxicity percentage. Dive will be constrained to not exceed this value.">Max CNS %</label>
+                <input type="number" id="max_cns" name="max_cns" value="80" min="10" max="100" step="5" />
+              </div>
+              <div class="field-row">
+                <label for="max_otu" data-tooltip="Maximum oxygen tolerance units per day. Dive will be constrained to not exceed this value.">Max OTU</label>
+                <input type="number" id="max_otu" name="max_otu" value="300" min="50" max="600" step="10" />
+              </div>
+              <div class="field-row">
+                <label for="max_runtime" data-tooltip="Maximum total dive runtime in minutes. Leave blank for no limit.">Max Runtime (min)</label>
+                <input type="number" id="max_runtime" name="max_runtime" placeholder="No limit" min="10" max="600" step="5" />
+              </div>
+              <div class="field-row">
+                <label for="min_bottom_time" data-tooltip="Minimum bottom time to search from, in minutes.">Min BT to search (min)</label>
+                <input type="number" id="min_bottom_time" name="min_bottom_time" value="1" min="1" max="180" step="1" />
+              </div>
+              <div class="field-row">
+                <label for="max_bottom_time" data-tooltip="Maximum bottom time to search up to, in minutes.">Max BT to search (min)</label>
+                <input type="number" id="max_bottom_time" name="max_bottom_time" value="180" min="1" max="600" step="1" />
+              </div>
+            </fieldset>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="optimise-btn" onclick="submitOptimise()">Find Max Bottom Time</button>
+          </div>
+        </div>
+
+        <div id="tab-full" class="tab-panel">
+          <div class="form-grid form-grid-full" style="margin-top:0">
+            <fieldset>
+              <legend>Back Gas Helper</legend>
+              <p class="text-muted" style="font-size:0.82rem;margin-bottom:0.8rem;line-height:1.4">
+                Set a target Equivalent Narcotic Depth (END) and the He% will be calculated automatically.<br>
+                O₂% is set to the max safe value at depth (ppO₂ limit).
+              </p>
+              <div class="field-row">
+                <label for="full_end_target" data-tooltip="Target Equivalent Narcotic Depth in metres. This sets the He% needed to reduce narcosis to the equivalent of this depth on air. e.g. 30m END at 45m depth → ~27% He">END Target (m)</label>
+                <input type="number" id="full_end_target" name="full_end_target" placeholder="e.g. 30" min="0" max="100" step="5" />
+              </div>
+              <div class="field-row">
+                <label style="color:var(--text-muted);font-size:0.82rem">Calculated back gas</label>
+                <span id="full-backgas-preview" style="font-size:0.85rem;color:var(--text-muted)">—</span>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Deco Gas 1 Search Range</legend>
+              <p class="text-muted" style="font-size:0.82rem;margin-bottom:0.8rem;line-height:1.4">
+                Deeper gas — switch depth auto-calculated from ppO₂ limit.
+              </p>
+              <div class="field-row">
+                <label for="deco1_o2_min" data-tooltip="Minimum O₂% for deco gas 1. Lower O₂ = deeper switch.">O₂% Min</label>
+                <input type="number" id="deco1_o2_min" name="deco1_o2_min" value="21" min="21" max="80" step="5" />
+              </div>
+              <div class="field-row">
+                <label for="deco1_o2_max" data-tooltip="Maximum O₂% for deco gas 1. Higher O₂ = shallower switch.">O₂% Max</label>
+                <input type="number" id="deco1_o2_max" name="deco1_o2_max" value="80" min="21" max="100" step="5" />
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Deco Gas 2 Search Range</legend>
+              <p class="text-muted" style="font-size:0.82rem;margin-bottom:0.8rem;line-height:1.4">
+                Shallow gas — must have a shallower switch than Deco Gas 1.
+              </p>
+              <div class="field-row">
+                <label for="deco2_o2_min" data-tooltip="Minimum O₂% for deco gas 2. e.g. 50% (EAN50).">O₂% Min</label>
+                <input type="number" id="deco2_o2_min" name="deco2_o2_min" value="50" min="21" max="100" step="5" />
+              </div>
+              <div class="field-row">
+                <label for="deco2_o2_max" data-tooltip="Maximum O₂% for deco gas 2. 100% = pure O₂.">O₂% Max</label>
+                <input type="number" id="deco2_o2_max" name="deco2_o2_max" value="100" min="21" max="100" step="5" />
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Constraint Limits</legend>
+              <div class="field-row">
+                <label for="full_max_cns" data-tooltip="Maximum CNS oxygen toxicity percentage.">Max CNS %</label>
+                <input type="number" id="full_max_cns" name="full_max_cns" value="80" min="10" max="100" step="5" />
+              </div>
+              <div class="field-row">
+                <label for="full_max_otu" data-tooltip="Maximum oxygen tolerance units per day.">Max OTU</label>
+                <input type="number" id="full_max_otu" name="full_max_otu" value="300" min="50" max="600" step="10" />
+              </div>
+              <div class="field-row">
+                <label for="full_max_runtime" data-tooltip="Maximum total dive runtime in minutes. Leave blank for no limit.">Max Runtime (min)</label>
+                <input type="number" id="full_max_runtime" name="full_max_runtime" placeholder="No limit" min="10" max="600" step="5" />
+              </div>
+              <div class="field-row">
+                <label for="full_min_bottom_time" data-tooltip="Minimum bottom time to search from, in minutes.">Min BT (min)</label>
+                <input type="number" id="full_min_bottom_time" name="full_min_bottom_time" value="1" min="1" max="180" step="1" />
+              </div>
+              <div class="field-row">
+                <label for="full_max_bottom_time" data-tooltip="Maximum bottom time to search up to, in minutes.">Max BT (min)</label>
+                <input type="number" id="full_max_bottom_time" name="full_max_bottom_time" value="180" min="1" max="600" step="1" />
+              </div>
+            </fieldset>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="full-opt-btn" onclick="submitFullOptimise()">Find Optimal Deco Gas</button>
+          </div>
+        </div>
+
+      </form>
+
+      <!-- Loading -->
+      <div id="loading" class="hidden">
+        <div class="spinner"></div>
+        <p id="loading-msg">Calculating decompression…</p>
+      </div>
+
+      <!-- Error -->
+      <div id="error-box" class="hidden error-box"></div>
+
+      <!-- Plan Results -->
+      <div id="results" class="hidden">
+        <h2>Dive Plan Results</h2>
+
+        <div class="results-grid">
+          <section class="card" id="card-summary">
+            <h3>Summary</h3>
+            <div id="summary-content"></div>
+          </section>
+
+          <section class="card" id="card-toxicity">
+            <h3>O₂ Toxicity</h3>
+            <div id="toxicity-content"></div>
+          </section>
+        </div>
+
+        <section class="card" id="card-deco">
+          <h3>Decompression Schedule</h3>
+          <div id="deco-chart-wrap"><canvas id="profile-chart"></canvas></div>
+          <div id="deco-content"></div>
+        </section>
+
+        <section class="card" id="card-gas">
+          <h3>Gas Usage</h3>
+          <div id="gas-content"></div>
+        </section>
+
+        <section class="card" id="card-mingas">
+          <h3>Gas Planning</h3>
+          <div id="mingas-content"></div>
+        </section>
+      </div>
+
+      <!-- Optimise Results -->
+      <div id="opt-results" class="hidden">
+        <h2>Optimiser Results</h2>
+
+        <section class="card">
+          <div class="big-result">
+            <div class="value" id="opt-max-bt">—</div>
+            <div class="label">minutes maximum bottom time</div>
+          </div>
+          <p id="opt-binding-header" class="text-muted" style="font-size:0.85rem;margin:0.5rem 0 0.25rem"></p>
+          <ul class="constraint-list" id="opt-binding"></ul>
+          <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem" id="opt-steps"></p>
+        </section>
+
+        <div class="results-grid">
+          <section class="card" id="opt-card-summary">
+            <h3>Summary (at max BT)</h3>
+            <div id="opt-summary-content"></div>
+          </section>
+
+          <section class="card" id="opt-card-toxicity">
+            <h3>O₂ Toxicity</h3>
+            <div id="opt-toxicity-content"></div>
+          </section>
+        </div>
+
+        <section class="card" id="opt-card-deco">
+          <h3>Decompression Schedule</h3>
+          <div id="opt-deco-chart-wrap"><canvas id="opt-profile-chart"></canvas></div>
+          <div id="opt-deco-content"></div>
+        </section>
+
+        <section class="card" id="opt-card-gas">
+          <h3>Gas Usage</h3>
+          <div id="opt-gas-content"></div>
+        </section>
+
+        <section class="card" id="opt-card-mingas">
+          <h3>Gas Planning</h3>
+          <div id="opt-mingas-content"></div>
+        </section>
+      </div>
+
+      <!-- Full Optimise Results -->
+      <div id="full-opt-results" class="hidden">
+        <h2>Mix Optimiser Results</h2>
+
+        <section class="card">
+          <div class="big-result">
+            <div class="value" id="full-opt-mix">—</div>
+            <div class="label" id="full-opt-bt-label">minutes bottom time</div>
+          </div>
+          <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem" id="full-opt-steps"></p>
+          <div id="full-opt-mix-table"></div>
+        </section>
+
+        <div class="results-grid">
+          <section class="card" id="full-opt-card-summary">
+            <h3>Summary (best mix at max BT)</h3>
+            <div id="full-opt-summary-content"></div>
+          </section>
+
+          <section class="card" id="full-opt-card-toxicity">
+            <h3>O₂ Toxicity</h3>
+            <div id="full-opt-toxicity-content"></div>
+          </section>
+        </div>
+
+        <section class="card" id="full-opt-card-deco">
+          <h3>Decompression Schedule</h3>
+          <div id="full-opt-deco-chart-wrap"><canvas id="full-opt-profile-chart"></canvas></div>
+          <div id="full-opt-deco-content"></div>
+        </section>
+
+        <section class="card" id="full-opt-card-gas">
+          <h3>Gas Usage</h3>
+          <div id="full-opt-gas-content"></div>
+        </section>
+
+        <section class="card" id="full-opt-card-mingas">
+          <h3>Gas Planning</h3>
+          <div id="full-opt-mingas-content"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

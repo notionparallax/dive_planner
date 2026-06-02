@@ -1,0 +1,299 @@
+Subsurface (6.0.5504-CICD-release) dive plan created on 1/6/26
+Runtime: 79min, Stop times: + 3:09 /m + 5:12 /min
+
+
+depth
+duration
+runtime
+gas
+➘
+50m
+1min
+1min
+air 
+➙
+50m
+19min
+20min
+ 
+➚
+18m
+4min
+24min
+ 
+➚
+15m
+0min
+24min
+ 
+-
+15m
+3min
+27min
+ 
+➚
+12m
+0min
+27min
+ 
+-
+12m
+4min
+31min
+ 
+➚
+9m
+0min
+31min
+ 
+-
+9m
+7min
+38min
+ 
+➚
+6m
+0min
+38min
+ 
+-
+6m
+12min
+50min
+ 
+➚
+3m
+0min
+50min
+ 
+-
+3m
+29min
+79min
+ 
+➚
+0m
+0min
+79min
+ 
+
+
+CNS: 12%
+OTU: 31
+
+Deco model: Bühlmann ZHL-16C with GFLow = 50% and GFHigh = 70%
+ATM pressure: 1,013mbar (0m)
+
+Gas consumption (based on SAC 20|17L/min):
+4,085L/351bar of air (1,759L/146bar in planned ascent)
+ — Warning: this is more gas than available in the specified cylinder (end pressure <= 10bar)!
+0L/0bar of air
+
+
+
+
+-----
+
+Subsurface (6.0.5504-CICD-release) dive plan created on 1/6/26
+Runtime: 45min, Stop times: + 1:02 /m + 1:41 /min
+
+
+depth
+duration
+runtime
+gas
+➘
+50m
+1min
+1min
+air 
+➙
+50m
+19min
+20min
+ 
+➚
+21m
+3min
+23min
+ 
+-
+21m
+1min
+24min
+EAN50 
+➚
+15m
+1min
+25min
+ 
+-
+15m
+1min
+26min
+ 
+➚
+12m
+0min
+26min
+ 
+-
+12m
+3min
+29min
+ 
+➚
+9m
+0min
+29min
+ 
+-
+9m
+4min
+33min
+ 
+➚
+6m
+0min
+33min
+ 
+-
+6m
+4min
+37min
+oxygen 
+➚
+3m
+0min
+37min
+ 
+-
+3m
+8min
+45min
+ 
+➚
+0m
+0min
+45min
+ 
+
+
+CNS: 30%
+OTU: 62
+
+Deco model: Bühlmann ZHL-16C with GFLow = 50% and GFHigh = 70%
+ATM pressure: 1,013mbar (0m)
+
+Gas consumption (based on SAC 20|20L/min):
+2,618L/228bar of air (291L/24bar in planned ascent)
+ — Warning: this is more gas than available in the specified cylinder (end pressure <= 10bar)!
+0L/0bar of air
+448L/38bar of EAN50 (448L/42bar in planned ascent)
+332L/27bar of oxygen (332L/30bar in planned ascent)
+
+---
+
+Subsurface (6.0.5504-CICD-release) dive plan created on 1/6/26
+Runtime: 45min, Stop times: + 0:52 /m + 2:11 /min
+
+
+depth
+duration
+runtime
+gas
+➘
+60m
+1min
+1min
+(18/45) 
+➙
+60m
+14min
+15min
+ 
+➚
+21m
+4min
+19min
+ 
+-
+21m
+1min
+20min
+EAN50 
+➚
+18m
+1min
+21min
+ 
+➚
+15m
+0min
+21min
+ 
+-
+15m
+2min
+23min
+ 
+➚
+12m
+0min
+23min
+ 
+-
+12m
+3min
+26min
+ 
+➚
+9m
+0min
+26min
+ 
+-
+9m
+4min
+30min
+ 
+➚
+6m
+0min
+30min
+ 
+-
+6m
+5min
+35min
+oxygen 
+➚
+3m
+0min
+35min
+ 
+-
+3m
+10min
+45min
+ 
+➚
+0m
+0min
+45min
+ 
+
+
+CNS: 31%
+OTU: 62
+
+Deco model: Bühlmann ZHL-16C with GFLow = 50% and GFHigh = 70%
+ATM pressure: 1,013mbar (0m)
+
+Gas consumption (based on SAC 20|20L/min):
+2,456L/216bar of (18/45) (437L/37bar in planned ascent)
+ — Warning: not enough reserve for gas sharing on ascent (end pressure <= 10bar)!
+0L/0bar of (18/45)
+493L/42bar of EAN50 (493L/46bar in planned ascent)
+416L/33bar of oxygen (416L/37bar in planned ascent)
+
