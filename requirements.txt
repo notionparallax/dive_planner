@@ -1,0 +1,6 @@
+git+https://github.com/notionparallax/decodaitengu.git
+streamlit>=1.32
+plotly>=5.20
+pandas>=2.0
+tabulate>=0.9
+matplotlib>=3.8
