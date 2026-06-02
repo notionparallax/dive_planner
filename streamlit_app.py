@@ -102,6 +102,9 @@ def _get_max_time(depth, back_gas, bgp, d50p, do2p, gfl, gfh, dr, ar, sb, sd):
     )
 
 
+_EMERGENCY_ASCENT_RATE = 18  # m/min — fast but survivable
+
+
 @st.cache_data
 def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, gfl, gfh, dr, ar, sb, sd, dst):
     D = depth
@@ -131,6 +134,21 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, gfl, gfh, dr, ar, sb
         r["leave_time"] = bt
         r["tag"] = tag
         results.append(r)
+
+    # Emergency scenario: GF 99/99, fast ascent, main depth/time
+    emerg = run_scenario(
+        "Emergency", D, T, deco_gases_lost=False,
+        back_gas=back_gas,
+        back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
+        gf_low=0.99, gf_high=0.99,
+        descent_rate=dr, ascent_rate=_EMERGENCY_ASCENT_RATE,
+        sac_bottom=sb, sac_deco=sd,
+        descent_stops=descent_stops,
+    )
+    emerg["leave_time"] = T
+    emerg["tag"] = "Emergency"
+    results.append(emerg)
+
     return results, scenario_defs
 
 
@@ -244,6 +262,7 @@ COLORS = [
     "#f7b6d2",  # no 50% (D) - light pink
     "#ff9896",  # no O2 (D) - light red
     "#8c8c8c",  # Bounce - grey
+    "#ff4444",  # Emergency - bright red
 ]
 
 
