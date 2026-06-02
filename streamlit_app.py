@@ -46,10 +46,10 @@ st.set_page_config(
 with st.sidebar:
     st.title("🤿 Dive Planner")
 
-    st.subheader("Gas")
+    st.subheader("Back Gas")
     col1, col2 = st.columns(2)
-    o2 = col1.number_input("O2%", min_value=18, max_value=40, value=22, step=1)
-    he = col2.number_input("He%", min_value=0, max_value=60, value=27, step=1)
+    o2 = col1.number_input("O2%", min_value=4, max_value=40, value=21, step=1)
+    he = col2.number_input("He%", min_value=0, max_value=90, value=0, step=1)
     back_gas = (int(o2), int(he))
 
     st.subheader("Depth & Time")
