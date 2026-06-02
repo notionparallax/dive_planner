@@ -82,7 +82,7 @@ with st.sidebar:
     if enable_stop:
         col1, col2 = st.columns(2)
         s_depth = int(col1.number_input("Depth (m)", min_value=3, max_value=20, value=5, step=1))
-        s_time = int(col2.number_input("Duration (min)", min_value=1, max_value=30, value=5, step=1))
+        s_time = int(col2.number_input("Duration (min)", min_value=1, max_value=30, value=1, step=1))
         descent_stops_tuple = ((s_depth, s_time),)
 
     st.subheader("Gas Consumption")
