@@ -321,10 +321,12 @@ def _color_cells(data):
     styles = pd.DataFrame("", index=data.index, columns=data.columns)
     for i in range(len(data)):
         row_label = data.iloc[i, 0]
-        if row_label not in stop_depth_labels:
+        # "0m" (surface/total time row) gets richest available gas color
+        is_surface = row_label == "0m"
+        if row_label not in stop_depth_labels and not is_surface:
             continue
         try:
-            row_depth = int(row_label.rstrip('m'))
+            row_depth = 0 if is_surface else int(row_label.rstrip('m'))
         except (ValueError, AttributeError):
             continue
         for j, col_name in enumerate(data.columns):
@@ -332,7 +334,7 @@ def _color_cells(data):
                 continue
             lost = col_to_lost.get(col_name, False)
             if row_depth <= rich_switch:
-                # Rich gas zone: green if rich available, yellow if rich is lost
+                # Rich gas zone (incl. surface): green if rich available, yellow if rich is lost
                 if lost not in (True, "rich"):
                     styles.iloc[i, j] = "background-color: rgba(0,180,0,0.18)"
                 else:

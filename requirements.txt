@@ -1,4 +1,4 @@
-git+https://github.com/notionparallax/decodaitengu.git
+decodaitengu>=1.1.0
 streamlit>=1.32
 plotly>=5.20
 pandas>=2.0
