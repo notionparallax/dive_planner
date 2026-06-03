@@ -1,0 +1,33 @@
+# Dive Planner — Ideas & Backlog
+
+## Safety & Validation
+
+- **Gas density warning** ✅ — Warn if gas density exceeds ~6.2 g/L (GUE/WKPP limit). Already tracked per-scenario; just needs a UI callout.
+- **CNS%/OTU flag** ✅ — Warn if CNS ≥ 80% in any scenario (the single-dive limit).
+- **Back gas ppO2 warning** ✅ — Warn if back gas ppO2 exceeds limit at depth (e.g. 32% O2 at 45m = 1.54 bar, close to or over the 1.4 bar bottom limit).
+
+## Planning Aids
+
+- **Rule of thirds on gas pressure chart** ✅ — Show the 1/3 turn pressure as a horizontal line on the gas pressure graph for back gas.
+- **NDL display** 🤔 — Engine returns NDL for no-deco dives. The counter-argument: NDL resolves on ascent so a true NDL needs to be computed at depth, not at surface. May be useful for the Bounce scenario. Worth revisiting if multi-level profiles are added.
+- **Best mix calculator** 💡 — Given a depth and target END, calculate the optimal trimix (O2 capped by ppO2 limit, He fills the rest). Toggle whether O2 counts as narcotic. Code skeleton already exists in `dive_plan.py` (`calculate_best_mix`).
+
+## Multi-level Dives 💡
+
+Allow a stepped profile (e.g. 40m → 30m → 20m), common in wreck diving. The descent stops mechanism already exists; the main work is:
+- UI to define depth/time waypoints
+- Ceiling computation across the full stepped profile
+- Deciding how scenarios (deeper, longer) interact with a multi-level plan
+
+## Export
+
+- **Wrist slate PNG** ✅ — Compact, Niimbot-printable image of the planning table. Subset of scenarios (probably just main + contingencies, not emergency). Subset of rows (depths and stop times, not gas stats). Fixed-width font, high contrast.
+
+## Rejected / Deferred
+
+- *No-rich deco penalty warning* — the scenario columns already show the difference visually.
+- *GF ceiling line on profile* — the emergency (GF 99/99) ascent line already serves this purpose.
+- *"What GF gives me X deco time?" slider* — encourages risky GF selection.
+- *QR code for URL* — not needed.
+- *Side-by-side GF comparison* — not needed.
+- *"What does adding O2 stage buy me?" comparison* — not needed.

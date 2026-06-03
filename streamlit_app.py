@@ -248,6 +248,26 @@ st.caption(
     f"Max bottom time: **{T}'** | Descent: {descent_rate} m/min | "
     f"Ascent: {ascent_rate} m/min | SAC: {sac_bottom}/{sac_deco} L/min"
 )
+
+# ─── Safety warnings ─────────────────────────────────────────────────────────
+_CNS_WARN = 80.0
+_DENSITY_WARN = 6.2  # g/L — GUE/WKPP limit
+
+_warnings = []
+for r in results:
+    tag = r["tag"]
+    if r["cns"] >= _CNS_WARN:
+        _warnings.append(f"⚠️ **{tag}**: CNS {r['cns']:.0f}% (limit 80%)")
+    if r["max_gas_density"] >= _DENSITY_WARN:
+        _warnings.append(
+            f"⚠️ **{tag}**: gas density {r['max_gas_density']:.2f} g/L "
+            f"(GUE/WKPP limit {_DENSITY_WARN} g/L)"
+        )
+
+if _warnings:
+    with st.expander(f"⚠️ {len(_warnings)} warning(s)", expanded=True):
+        for w in _warnings:
+            st.markdown(w)
 
 # ─── Planning table ───────────────────────────────────────────────────────────
 st.subheader("Planning Table")
