@@ -60,12 +60,6 @@ def _qpb(key, default):
 with st.sidebar:
     st.title("🤿 Dive Planner")
 
-    st.subheader("Back Gas")
-    col1, col2 = st.columns(2)
-    o2 = col1.number_input("O2%", min_value=4, max_value=40, value=_qpi("o2", 21), step=1)
-    he = col2.number_input("He%", min_value=0, max_value=90, value=_qpi("he", 0), step=1)
-    back_gas = (int(o2), int(he))
-
     st.subheader("Depth & Time")
     depth = int(st.number_input("Depth (m)", min_value=10, max_value=80, value=_qpi("depth", 48), step=1))
     auto_time = st.checkbox("Auto bottom time", value=_qpb("auto_time", True),
@@ -74,36 +68,46 @@ with st.sidebar:
     if not auto_time:
         manual_bt_val = int(st.number_input("Bottom time (min)", min_value=5, max_value=120, value=_qpi("manual_bt", 31), step=1))
 
-    st.subheader("Cylinders")
-    cyl_col1, cyl_col2, cyl_col3 = st.columns(3)
-    with cyl_col1:
-        st.markdown("**Back gas**")
-        back_gas_pressure = int(st.number_input("Bar##bgp", min_value=150, max_value=300, value=_qpi("bgp", 230), step=5, key="bgp", label_visibility="collapsed"))
-        back_gas_vol = st.number_input("L##bgv", min_value=3.0, max_value=30.0, value=float(_qpf("bgv", 24.4)), step=0.1, key="bgv", format="%.1f", label_visibility="collapsed")
-        st.caption("bar / L")
-    with cyl_col2:
-        st.markdown("**Lean deco**")
-        deco_50_pressure = int(st.number_input("Bar##lp", min_value=50, max_value=250, value=_qpi("lp", 200), step=5, key="lp", label_visibility="collapsed"))
-        deco_50_vol = st.number_input("L##lv", min_value=3.0, max_value=20.0, value=float(_qpf("lv", 11.1)), step=0.1, key="lv", format="%.1f", label_visibility="collapsed")
-        st.caption("bar / L")
-    with cyl_col3:
-        st.markdown("**Rich deco**")
-        deco_o2_pressure = int(st.number_input("Bar##rp", min_value=50, max_value=250, value=_qpi("rp", 200), step=5, key="rp", label_visibility="collapsed"))
-        deco_o2_vol = st.number_input("L##rv", min_value=3.0, max_value=20.0, value=float(_qpf("rv", 11.1)), step=0.1, key="rv", format="%.1f", label_visibility="collapsed")
-        st.caption("bar / L")
-
-    st.subheader("Deco Gas Mixes")
-    lean_col1, lean_col2, lean_col3 = st.columns(3)
-    lean_o2 = int(lean_col1.number_input("Lean O2%", min_value=21, max_value=80, value=_qpi("lo2", 50), step=1, key="lo2"))
-    lean_he = int(lean_col2.number_input("Lean He%", min_value=0, max_value=50, value=_qpi("lhe", 0), step=1, key="lhe"))
-    _lean_switch_auto = int((1.6 / (lean_o2 / 100.0) - SURFACE_PRESSURE) * 10 // 3) * 3
-    lean_switch = int(lean_col3.number_input("Lean switch (m)", min_value=3, max_value=40, value=_qpi("lsw", _lean_switch_auto), step=3, key="lsw"))
-
-    rich_col1, rich_col2, rich_col3 = st.columns(3)
-    rich_o2 = int(rich_col1.number_input("Rich O2%", min_value=50, max_value=100, value=_qpi("ro2", 100), step=1, key="ro2"))
-    rich_he = int(rich_col2.number_input("Rich He%", min_value=0, max_value=30, value=_qpi("rhe", 0), step=1, key="rhe"))
-    _rich_switch_auto = int((1.6 / (rich_o2 / 100.0) - SURFACE_PRESSURE) * 10 // 3) * 3
-    rich_switch = int(rich_col3.number_input("Rich switch (m)", min_value=3, max_value=15, value=_qpi("rsw", _rich_switch_auto), step=3, key="rsw"))
+    st.subheader("Gases & Cylinders")
+    _gas_defaults = pd.DataFrame({
+        "Gas":     ["Back",  "Lean",  "Rich"],
+        "O2%":     [_qpi("o2",  21),  _qpi("lo2", 50),  _qpi("ro2", 100)],
+        "He%":     [_qpi("he",   0),  _qpi("lhe",  0),  _qpi("rhe",   0)],
+        "Switch m":[-1,              _qpi("lsw", 21),  _qpi("rsw",   6)],
+        "Bar":     [_qpi("bgp", 230), _qpi("lp",  200), _qpi("rp",  200)],
+        "Litres":  [_qpf("bgv", 24.4),_qpf("lv",  11.1),_qpf("rv",  11.1)],
+    })
+    _gas_table = st.data_editor(
+        _gas_defaults,
+        column_config={
+            "Gas":      st.column_config.TextColumn(disabled=True, width="small"),
+            "O2%":      st.column_config.NumberColumn(min_value=4,   max_value=100, step=1,   format="%d", width="small"),
+            "He%":      st.column_config.NumberColumn(min_value=0,   max_value=90,  step=1,   format="%d", width="small"),
+            "Switch m": st.column_config.NumberColumn(min_value=-1,  max_value=40,  step=3,   format="%d", width="small",
+                                                       help="Depth to switch to this gas. -1 = back gas (not applicable)."),
+            "Bar":      st.column_config.NumberColumn(min_value=50,  max_value=300, step=5,   format="%d", width="small"),
+            "Litres":   st.column_config.NumberColumn(min_value=3.0, max_value=30.0,step=0.1, format="%.1f", width="small"),
+        },
+        hide_index=True,
+        use_container_width=True,
+        key="gas_table",
+        num_rows="fixed",
+    )
+    o2           = int(_gas_table.iloc[0]["O2%"])
+    he           = int(_gas_table.iloc[0]["He%"])
+    back_gas_pressure = int(_gas_table.iloc[0]["Bar"])
+    back_gas_vol = float(_gas_table.iloc[0]["Litres"])
+    lean_o2      = int(_gas_table.iloc[1]["O2%"])
+    lean_he      = int(_gas_table.iloc[1]["He%"])
+    lean_switch  = int(_gas_table.iloc[1]["Switch m"])
+    deco_50_pressure = int(_gas_table.iloc[1]["Bar"])
+    deco_50_vol  = float(_gas_table.iloc[1]["Litres"])
+    rich_o2      = int(_gas_table.iloc[2]["O2%"])
+    rich_he      = int(_gas_table.iloc[2]["He%"])
+    rich_switch  = int(_gas_table.iloc[2]["Switch m"])
+    deco_o2_pressure = int(_gas_table.iloc[2]["Bar"])
+    deco_o2_vol  = float(_gas_table.iloc[2]["Litres"])
+    back_gas = (o2, he)
 
     st.subheader("Deco Model")
     col1, col2 = st.columns(2)
@@ -177,10 +181,10 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
         (D,     T + 3,  False,    "Longer"),
         (D + 3, T,      False,    "Deeper"),
         (D + 3, T + 3,  False,    "D & L"),
-        (D,     T,      "lean",   "no lean"),
-        (D,     T,      "rich",   "no rich"),
-        (D + 3, T + 3,  "lean",   "no lean (D)"),
-        (D + 3, T + 3,  "rich",   "no rich (D)"),
+        (D,     T,      "lean",   f"no {lean_gas[0]}%"),
+        (D,     T,      "rich",   f"no {rich_gas[0]}%"),
+        (D + 3, T + 3,  "lean",   f"no {lean_gas[0]}% (D)"),
+        (D + 3, T + 3,  "rich",   f"no {rich_gas[0]}% (D)"),
         (D,     10,     False,    "Bounce"),
     ]
     results = []
@@ -322,9 +326,14 @@ def _color_cells(data):
             if j == 0:
                 continue
             lost = col_to_lost.get(col_name, False)
+            # Rich-depth stops: color green if rich gas is available in this scenario
             if row_label in rich_row_labels and lost not in (True, "rich"):
                 styles.iloc[i, j] = "background-color: rgba(0,180,0,0.18)"
+            # Lean-depth stops: color yellow if lean gas is available (even if rich is lost)
             elif row_label in lean_row_labels and lost not in (True, "lean"):
+                styles.iloc[i, j] = "background-color: rgba(200,200,0,0.18)"
+            # "no rich" columns: at rich-depth stops they'll be on lean gas — color yellow
+            elif row_label in rich_row_labels and lost == "rich":
                 styles.iloc[i, j] = "background-color: rgba(200,200,0,0.18)"
     return styles
 
