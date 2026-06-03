@@ -263,10 +263,8 @@ all_stop_depths = sorted(
 # Determine depth rows
 depth_set = sorted({r["depth"] for r in results}, reverse=True)
 
-# Track which labels need cell coloring based on configured switch depths
-# Use round() to match the int-truncated label, avoiding float precision issues
-rich_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if round(sd) <= rich_switch}
-lean_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if rich_switch < round(sd) <= lean_switch}
+# Set of all deco stop row labels (used to avoid coloring non-stop rows like "48m", "Total deco" etc.)
+stop_depth_labels = {f"{int(sd)}m" for sd in all_stop_depths}
 
 table_rows = {}
 
@@ -323,19 +321,26 @@ def _color_cells(data):
     styles = pd.DataFrame("", index=data.index, columns=data.columns)
     for i in range(len(data)):
         row_label = data.iloc[i, 0]
+        if row_label not in stop_depth_labels:
+            continue
+        try:
+            row_depth = int(row_label.rstrip('m'))
+        except (ValueError, AttributeError):
+            continue
         for j, col_name in enumerate(data.columns):
             if j == 0:
                 continue
             lost = col_to_lost.get(col_name, False)
-            # Rich-depth stops: color green if rich gas is available in this scenario
-            if row_label in rich_row_labels and lost not in (True, "rich"):
-                styles.iloc[i, j] = "background-color: rgba(0,180,0,0.18)"
-            # Lean-depth stops: color yellow if lean gas is available (even if rich is lost)
-            elif row_label in lean_row_labels and lost not in (True, "lean"):
-                styles.iloc[i, j] = "background-color: rgba(200,200,0,0.18)"
-            # "no rich" columns: at rich-depth stops they'll be on lean gas — color yellow
-            elif row_label in rich_row_labels and lost == "rich":
-                styles.iloc[i, j] = "background-color: rgba(200,200,0,0.18)"
+            if row_depth <= rich_switch:
+                # Rich gas zone: green if rich available, yellow if rich is lost
+                if lost not in (True, "rich"):
+                    styles.iloc[i, j] = "background-color: rgba(0,180,0,0.18)"
+                else:
+                    styles.iloc[i, j] = "background-color: rgba(200,200,0,0.18)"
+            elif row_depth <= lean_switch:
+                # Lean gas zone: yellow if lean available
+                if lost not in (True, "lean"):
+                    styles.iloc[i, j] = "background-color: rgba(200,200,0,0.18)"
     return styles
 
 styled_df = df.style.apply(_color_cells, axis=None)
