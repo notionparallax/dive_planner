@@ -89,7 +89,7 @@ with st.sidebar:
             "Litres":   st.column_config.NumberColumn(min_value=3.0, max_value=30.0,step=0.1, format="%.1f", width="small"),
         },
         hide_index=True,
-        use_container_width=True,
+        width='stretch',
         key="gas_table",
         num_rows="fixed",
     )
@@ -342,7 +342,7 @@ st.dataframe(
     styled_df,
     column_config={"": st.column_config.TextColumn(width="medium")},
     hide_index=True,
-    use_container_width=True,
+    width='stretch',
 )
 
 # ─── Scenario selector ────────────────────────────────────────────────────────
@@ -512,7 +512,7 @@ fig.update_yaxes(autorange="reversed", title_text="Depth (m)", row=1, col=1)
 fig.update_yaxes(title_text="Pressure (bar)", rangemode="tozero", row=2, col=1)
 fig.update_xaxes(title_text="Time (min)", row=2, col=1)
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 # ─── CSV download ─────────────────────────────────────────────────────────────
 st.subheader("Export")
