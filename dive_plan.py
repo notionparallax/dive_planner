@@ -123,6 +123,8 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
     deco_gas_objs = []
     deco_cyl_objs = []
     for idx, (o2, he, sd) in enumerate(_deco_gases_raw):
+        if float(sd) >= depth:
+            continue  # skip gas whose switch depth is at or beyond dive depth
         if idx == 0:  # lean gas
             label = 'lean'
             vol = _deco_50_vol
@@ -270,6 +272,8 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             if has_switch_stop:
                 switch_depth = float(first_non_o2[1])
             for cyl, sd in deco_cyls_with_depths:
+                if float(sd) >= depth:
+                    continue  # skip gas whose switch depth is at or beyond dive depth
                 deco_gas_objs.append(_Gas(o2=cyl.gas.o2, he=cyl.gas.he, switch_depth=float(sd), label=cyl.name))
                 deco_cyl_objs.append(_Cylinder(volume_litres=cyl.volume_l, fill_bar=cyl.fill_pressure_bar))
 
