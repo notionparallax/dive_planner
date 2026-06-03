@@ -79,6 +79,8 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
                sac_bottom=None, sac_deco=None,
                back_gas_pressure=None, deco_50_pressure=None, deco_o2_pressure=None,
                back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
+               lean_gas=None, lean_switch=None,
+               rich_gas=None, rich_switch=None,
                descent_stops=None):
     """Run a decompression calculation and return a DiveSummary.
 
@@ -101,6 +103,10 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
     _back_gas_vol = back_gas_vol if back_gas_vol is not None else BACK_GAS_VOL
     _deco_50_vol = deco_50_vol if deco_50_vol is not None else DECO_50_VOL
     _deco_o2_vol = deco_o2_vol if deco_o2_vol is not None else DECO_O2_VOL
+    _lean_gas = lean_gas if lean_gas is not None else (50, 0)
+    _lean_switch = lean_switch if lean_switch is not None else _DECO_50_SWITCH_DEPTH
+    _rich_gas = rich_gas if rich_gas is not None else (100, 0)
+    _rich_switch = rich_switch if rich_switch is not None else _DECO_O2_SWITCH_DEPTH
 
     back_gas_obj = _Gas(o2=_back_gas[0], he=_back_gas[1], label='back')
     back_cyl_obj = _Cylinder(volume_litres=_back_gas_vol, fill_bar=_back_gas_pressure)
@@ -109,20 +115,22 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
         _deco_gases_raw = deco_cylinders_config
     else:
         _deco_gases_raw = []
-        if deco_gases_lost not in (True, 'ean50'):
-            _deco_gases_raw.append((50, 0, _DECO_50_SWITCH_DEPTH))
-        if deco_gases_lost not in (True, 'o2'):
-            _deco_gases_raw.append((100, 0, _DECO_O2_SWITCH_DEPTH))
+        if deco_gases_lost not in (True, 'lean'):
+            _deco_gases_raw.append((*_lean_gas, _lean_switch))
+        if deco_gases_lost not in (True, 'rich'):
+            _deco_gases_raw.append((*_rich_gas, _rich_switch))
 
     deco_gas_objs = []
     deco_cyl_objs = []
-    for o2, he, sd in _deco_gases_raw:
-        if o2 == 50 and he == 0:
-            label, vol, pressure = 'ean50', _deco_50_vol, _deco_50_pressure
-        elif o2 == 100 and he == 0:
-            label, vol, pressure = 'o2', _deco_o2_vol, _deco_o2_pressure
-        else:
-            label, vol, pressure = f'tx{o2}/{he}', _deco_50_vol, _deco_50_pressure
+    for idx, (o2, he, sd) in enumerate(_deco_gases_raw):
+        if idx == 0:  # lean gas
+            label = 'lean'
+            vol = _deco_50_vol
+            pressure = _deco_50_pressure
+        else:  # rich gas
+            label = 'rich'
+            vol = _deco_o2_vol
+            pressure = _deco_o2_pressure
         deco_gas_objs.append(_Gas(o2=o2, he=he, switch_depth=float(sd), label=label))
         deco_cyl_objs.append(_Cylinder(volume_litres=vol, fill_bar=pressure))
 
@@ -203,6 +211,8 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
                  back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
                  gf_low=None, gf_high=None, descent_rate=None, ascent_rate=None,
                  sac_bottom=None, sac_deco=None,
+                 lean_gas=None, lean_switch=None,
+                 rich_gas=None, rich_switch=None,
                  descent_stops=None):
     """Run a complete scenario and return results dict.
 
@@ -224,6 +234,10 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
     _back_gas_vol = back_gas_vol if back_gas_vol is not None else BACK_GAS_VOL
     _deco_50_vol = deco_50_vol if deco_50_vol is not None else DECO_50_VOL
     _deco_o2_vol = deco_o2_vol if deco_o2_vol is not None else DECO_O2_VOL
+    _lean_gas = lean_gas if lean_gas is not None else (50, 0)
+    _lean_switch = lean_switch if lean_switch is not None else _DECO_50_SWITCH_DEPTH
+    _rich_gas = rich_gas if rich_gas is not None else (100, 0)
+    _rich_switch = rich_switch if rich_switch is not None else _DECO_O2_SWITCH_DEPTH
     _cfg = cfg or {}
     _sac_bottom = sac_bottom if sac_bottom is not None else (_cfg.get('sac_bottom') if _cfg.get('sac_bottom') is not None else SAC_BOTTOM)
     _sac_deco = sac_deco if sac_deco is not None else (_cfg.get('sac_deco') if _cfg.get('sac_deco') is not None else SAC_DECO)
@@ -249,7 +263,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         deco_gas_objs = []
         deco_cyl_objs = []
         has_switch_stop = False
-        switch_depth = _DECO_50_SWITCH_DEPTH
+        switch_depth = _lean_switch
         if deco_cyls_with_depths is not None:
             first_non_o2 = next(((c, sd) for c, sd in deco_cyls_with_depths if c.gas.o2 < 100), None)
             has_switch_stop = first_non_o2 is not None
@@ -299,14 +313,14 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         )
 
         back_remaining = cylinders_result[0]['remaining_bar'] if cylinders_result else None
-        ean50_remaining = next(
-            (c['remaining_bar'] for c in cylinders_result if c['gas']['o2'] == 50 and c['gas']['he'] == 0), None)
-        o2_remaining = next(
-            (c['remaining_bar'] for c in cylinders_result if c['gas']['o2'] == 100), None)
+        lean_remaining = next(
+            (c['remaining_bar'] for c in cylinders_result if c['gas']['o2'] == _lean_gas[0] and c['gas']['he'] == _lean_gas[1]), None)
+        rich_remaining = next(
+            (c['remaining_bar'] for c in cylinders_result if c['gas']['o2'] == _rich_gas[0]), None)
         gas_used = {c['name']: {'litres': c['used_litres'], 'bar': c['used_bar']}
                     for c in cylinders_result}
     else:
-        # Non-cfg path: use run_profile with default gas labels
+        # Non-cfg path: use run_profile with lean/rich gas params
         summary = run_profile(
             depth, bottom_time, deco_gases_lost,
             back_gas=back_gas_tuple,
@@ -319,21 +333,23 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             back_gas_vol=_back_gas_vol,
             deco_50_vol=_deco_50_vol,
             deco_o2_vol=_deco_o2_vol,
+            lean_gas=_lean_gas, lean_switch=_lean_switch,
+            rich_gas=_rich_gas, rich_switch=_rich_switch,
             descent_stops=descent_stops,
         )
 
         back_usage = summary.gas_usage.get('back')
-        ean50_usage = summary.gas_usage.get('ean50')
-        o2_usage = summary.gas_usage.get('o2')
+        lean_usage = summary.gas_usage.get('lean')
+        rich_usage = summary.gas_usage.get('rich')
 
         back_remaining = back_usage.remaining_bar if back_usage else _back_gas_pressure
-        ean50_remaining = ean50_usage.remaining_bar if ean50_usage else _deco_50_pressure
-        o2_remaining = o2_usage.remaining_bar if o2_usage else _deco_o2_pressure
+        lean_remaining = lean_usage.remaining_bar if lean_usage else _deco_50_pressure
+        rich_remaining = rich_usage.remaining_bar if rich_usage else _deco_o2_pressure
 
         gas_used = {
             'back_gas': back_usage.consumed_litres if back_usage else 0.0,
-            'ean50': ean50_usage.consumed_litres if ean50_usage else 0.0,
-            'o2': o2_usage.consumed_litres if o2_usage else 0.0,
+            'lean': lean_usage.consumed_litres if lean_usage else 0.0,
+            'rich': rich_usage.consumed_litres if rich_usage else 0.0,
         }
 
         min_gas = calculate_min_gas_and_turn_from_summary(
@@ -343,8 +359,8 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             sac_bottom=_sac_bottom,
         )
 
-        has_switch_stop = deco_gases_lost not in (True, 'ean50')
-        switch_depth = _DECO_50_SWITCH_DEPTH
+        has_switch_stop = deco_gases_lost not in (True, 'lean')
+        switch_depth = _lean_switch
         cylinders_result = None
 
     # Build deco_stops and apply switch stop
@@ -383,8 +399,12 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         'cns': summary.cns_percent,
         'gas_used': gas_used,
         'back_remaining_bar': back_remaining,
-        'ean50_remaining_bar': ean50_remaining,
-        'o2_remaining_bar': o2_remaining,
+        'lean_remaining_bar': lean_remaining,
+        'rich_remaining_bar': rich_remaining,
+        'lean_gas': _lean_gas,
+        'rich_gas': _rich_gas,
+        'lean_switch': _lean_switch,
+        'rich_switch': _rich_switch,
         'min_gas': min_gas,
         'max_gas_density': summary.max_gas_density,
     }
@@ -432,10 +452,10 @@ def print_table(results):
         ("", lambda r: ""),
         ("Back gas used (bar)", lambda r: f"{(BACK_GAS_PRESSURE - r['back_remaining_bar']):.0f}"),
         ("Back gas remaining (bar)", lambda r: f"{r['back_remaining_bar']:.0f}"),
-        ("EAN50 used (bar)", lambda r: f"{(DECO_50_PRESSURE - r['ean50_remaining_bar']):.0f}" if r['deco_gases_lost'] not in (True, 'ean50') else "N/A"),
-        ("EAN50 remaining (bar)", lambda r: f"{r['ean50_remaining_bar']:.0f}" if r['deco_gases_lost'] not in (True, 'ean50') else "N/A"),
-        ("O2 used (bar)", lambda r: f"{(DECO_O2_PRESSURE - r['o2_remaining_bar']):.0f}" if r['deco_gases_lost'] not in (True, 'o2') else "N/A"),
-        ("O2 remaining (bar)", lambda r: f"{r['o2_remaining_bar']:.0f}" if r['deco_gases_lost'] not in (True, 'o2') else "N/A"),
+        ("EAN50 used (bar)", lambda r: f"{(DECO_50_PRESSURE - r['lean_remaining_bar']):.0f}" if r['deco_gases_lost'] not in (True, 'lean') else "N/A"),
+        ("EAN50 remaining (bar)", lambda r: f"{r['lean_remaining_bar']:.0f}" if r['deco_gases_lost'] not in (True, 'lean') else "N/A"),
+        ("O2 used (bar)", lambda r: f"{(DECO_O2_PRESSURE - r['rich_remaining_bar']):.0f}" if r['deco_gases_lost'] not in (True, 'rich') else "N/A"),
+        ("O2 remaining (bar)", lambda r: f"{r['rich_remaining_bar']:.0f}" if r['deco_gases_lost'] not in (True, 'rich') else "N/A"),
         ("", lambda r: ""),
         ("--- O2 TOXICITY ---", lambda r: ""),
         ("OTU", lambda r: f"{r['otu']:.0f}"),
@@ -448,12 +468,12 @@ def print_table(results):
         ("", lambda r: ""),
         ("--- END GAS ---", lambda r: ""),
         ("End: Back/50/O2 (bar)", lambda r:
-            f"{r['back_remaining_bar']:.0f}/{r['ean50_remaining_bar']:.0f}/{r['o2_remaining_bar']:.0f}"
+            f"{r['back_remaining_bar']:.0f}/{r['lean_remaining_bar']:.0f}/{r['rich_remaining_bar']:.0f}"
             if r['deco_gases_lost'] is False else
-            f"{r['back_remaining_bar']:.0f}/--/{r['o2_remaining_bar']:.0f}"
-            if r['deco_gases_lost'] == 'ean50' else
-            f"{r['back_remaining_bar']:.0f}/{r['ean50_remaining_bar']:.0f}/--"
-            if r['deco_gases_lost'] == 'o2' else
+            f"{r['back_remaining_bar']:.0f}/--/{r['rich_remaining_bar']:.0f}"
+            if r['deco_gases_lost'] == 'lean' else
+            f"{r['back_remaining_bar']:.0f}/{r['lean_remaining_bar']:.0f}/--"
+            if r['deco_gases_lost'] == 'rich' else
             f"{r['back_remaining_bar']:.0f}/--/--"),
     ])
 
@@ -768,7 +788,9 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         deco_o2_pressure=None,
                         back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
                         gf_low=None, gf_high=None, descent_rate=None,
-                        ascent_rate=None, sac_bottom=None, sac_deco=None):
+                        ascent_rate=None, sac_bottom=None, sac_deco=None,
+                        lean_gas=None, lean_switch=None,
+                        rich_gas=None, rich_switch=None):
     """
     Find the maximum bottom time satisfying the gas rule.
 
@@ -794,6 +816,10 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
     _back_gas_vol = back_gas_vol if back_gas_vol is not None else BACK_GAS_VOL
     _deco_50_vol = deco_50_vol if deco_50_vol is not None else DECO_50_VOL
     _deco_o2_vol = deco_o2_vol if deco_o2_vol is not None else DECO_O2_VOL
+    _lean_gas = lean_gas if lean_gas is not None else (50, 0)
+    _lean_switch = lean_switch if lean_switch is not None else _DECO_50_SWITCH_DEPTH
+    _rich_gas = rich_gas if rich_gas is not None else (100, 0)
+    _rich_switch = rich_switch if rich_switch is not None else _DECO_O2_SWITCH_DEPTH
     thirds_pressure = _back_gas_pressure * 2 / 3
 
     lo, hi = 1, 120
@@ -803,16 +829,16 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
         try:
             if gas_rule == 'double_ascent':
                 # Check all contingency scenarios fit within cylinder capacity
-                # Worst cases: T+3 @ D+3 with lost EAN50 or lost O2
+                # Worst cases: T+3 @ D+3 with lost lean or lost rich gas
                 scenarios = [
                     (depth, mid, False),
                     (depth, mid + 3, False),
                     (depth + 3, mid, False),
                     (depth + 3, mid + 3, False),
-                    (depth, mid, 'ean50'),
-                    (depth, mid, 'o2'),
-                    (depth + 3, mid + 3, 'ean50'),
-                    (depth + 3, mid + 3, 'o2'),
+                    (depth, mid, 'lean'),
+                    (depth, mid, 'rich'),
+                    (depth + 3, mid + 3, 'lean'),
+                    (depth + 3, mid + 3, 'rich'),
                 ]
                 ok = True
                 for d, bt, lost in scenarios:
@@ -824,16 +850,18 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                      back_gas_vol=_back_gas_vol,
                                      deco_50_vol=_deco_50_vol,
                                      deco_o2_vol=_deco_o2_vol,
+                                     lean_gas=_lean_gas, lean_switch=_lean_switch,
+                                     rich_gas=_rich_gas, rich_switch=_rich_switch,
                                      gf_low=_gf_low, gf_high=_gf_high,
                                      descent_rate=_descent_rate, ascent_rate=_ascent_rate,
                                      sac_bottom=_sac_bottom, sac_deco=_sac_deco)
                     if r['back_remaining_bar'] < 0:
                         ok = False
                         break
-                    if lost not in (True, 'ean50') and r['ean50_remaining_bar'] < 0:
+                    if lost not in (True, 'lean') and r['lean_remaining_bar'] < 0:
                         ok = False
                         break
-                    if lost not in (True, 'o2') and r['o2_remaining_bar'] < 0:
+                    if lost not in (True, 'rich') and r['rich_remaining_bar'] < 0:
                         ok = False
                         break
             else:
@@ -845,6 +873,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                  back_gas_vol=_back_gas_vol,
                                  deco_50_vol=_deco_50_vol,
                                  deco_o2_vol=_deco_o2_vol,
+                                 lean_gas=_lean_gas, lean_switch=_lean_switch,
+                                 rich_gas=_rich_gas, rich_switch=_rich_switch,
                                  gf_low=_gf_low, gf_high=_gf_high,
                                  descent_rate=_descent_rate, ascent_rate=_ascent_rate,
                                  sac_bottom=_sac_bottom, sac_deco=_sac_deco)
@@ -925,10 +955,10 @@ def generate_planning_table(depth, back_gas=None, bottom_time=None,
         (D,   T+3, False, "Longer"),
         (D+3, T,   False, "Deeper"),
         (D+3, T+3, False, "D & L"),
-        (D,   T,   'ean50', "no 50"),
-        (D,   T,   'o2', "no O2"),
-        (D+3, T+3, 'ean50', "no 50"),
-        (D+3, T+3, 'o2', "no O2"),
+        (D,   T,   'lean', "no lean"),
+        (D,   T,   'rich', "no rich"),
+        (D+3, T+3, 'lean', "no lean"),
+        (D+3, T+3, 'rich', "no rich"),
         (D,   10, False, "bounce"),
     ]
 

@@ -28,8 +28,6 @@ from dive_plan import (  # noqa: E402
     SAC_DECO,
     SURFACE_PRESSURE,
     WATER_TEMP_C,
-    _DECO_50_SWITCH_DEPTH,
-    _DECO_O2_SWITCH_DEPTH,
     _gas_density_gl,
     find_max_bottom_time,
     run_scenario,
@@ -80,16 +78,32 @@ with st.sidebar:
     cyl_col1, cyl_col2, cyl_col3 = st.columns(3)
     with cyl_col1:
         st.markdown("**Back gas**")
-        back_gas_pressure = int(st.number_input("Bar", min_value=150, max_value=300, value=_qpi("bgp", 230), step=5, key="bgp"))
-        back_gas_vol = st.number_input("Litres", min_value=3.0, max_value=30.0, value=float(_qpf("bgv", 24.4)), step=0.1, key="bgv", format="%.1f")
+        back_gas_pressure = int(st.number_input("Bar##bgp", min_value=150, max_value=300, value=_qpi("bgp", 230), step=5, key="bgp", label_visibility="collapsed"))
+        back_gas_vol = st.number_input("L##bgv", min_value=3.0, max_value=30.0, value=float(_qpf("bgv", 24.4)), step=0.1, key="bgv", format="%.1f", label_visibility="collapsed")
+        st.caption("bar / L")
     with cyl_col2:
-        st.markdown("**EAN50**")
-        deco_50_pressure = int(st.number_input("Bar", min_value=100, max_value=250, value=_qpi("d50p", 200), step=5, key="d50p"))
-        deco_50_vol = st.number_input("Litres", min_value=3.0, max_value=20.0, value=float(_qpf("d50v", 11.1)), step=0.1, key="d50v", format="%.1f")
+        st.markdown("**Lean deco**")
+        deco_50_pressure = int(st.number_input("Bar##lp", min_value=50, max_value=250, value=_qpi("lp", 200), step=5, key="lp", label_visibility="collapsed"))
+        deco_50_vol = st.number_input("L##lv", min_value=3.0, max_value=20.0, value=float(_qpf("lv", 11.1)), step=0.1, key="lv", format="%.1f", label_visibility="collapsed")
+        st.caption("bar / L")
     with cyl_col3:
-        st.markdown("**O2**")
-        deco_o2_pressure = int(st.number_input("Bar", min_value=100, max_value=250, value=_qpi("do2p", 200), step=5, key="do2p"))
-        deco_o2_vol = st.number_input("Litres", min_value=3.0, max_value=20.0, value=float(_qpf("do2v", 11.1)), step=0.1, key="do2v", format="%.1f")
+        st.markdown("**Rich deco**")
+        deco_o2_pressure = int(st.number_input("Bar##rp", min_value=50, max_value=250, value=_qpi("rp", 200), step=5, key="rp", label_visibility="collapsed"))
+        deco_o2_vol = st.number_input("L##rv", min_value=3.0, max_value=20.0, value=float(_qpf("rv", 11.1)), step=0.1, key="rv", format="%.1f", label_visibility="collapsed")
+        st.caption("bar / L")
+
+    st.subheader("Deco Gas Mixes")
+    lean_col1, lean_col2, lean_col3 = st.columns(3)
+    lean_o2 = int(lean_col1.number_input("Lean O2%", min_value=21, max_value=80, value=_qpi("lo2", 50), step=1, key="lo2"))
+    lean_he = int(lean_col2.number_input("Lean He%", min_value=0, max_value=50, value=_qpi("lhe", 0), step=1, key="lhe"))
+    _lean_switch_auto = int((1.6 / (lean_o2 / 100.0) - SURFACE_PRESSURE) * 10 // 3) * 3
+    lean_switch = int(lean_col3.number_input("Lean switch (m)", min_value=3, max_value=40, value=_qpi("lsw", _lean_switch_auto), step=3, key="lsw"))
+
+    rich_col1, rich_col2, rich_col3 = st.columns(3)
+    rich_o2 = int(rich_col1.number_input("Rich O2%", min_value=50, max_value=100, value=_qpi("ro2", 100), step=1, key="ro2"))
+    rich_he = int(rich_col2.number_input("Rich He%", min_value=0, max_value=30, value=_qpi("rhe", 0), step=1, key="rhe"))
+    _rich_switch_auto = int((1.6 / (rich_o2 / 100.0) - SURFACE_PRESSURE) * 10 // 3) * 3
+    rich_switch = int(rich_col3.number_input("Rich switch (m)", min_value=3, max_value=15, value=_qpi("rsw", _rich_switch_auto), step=3, key="rsw"))
 
     st.subheader("Deco Model")
     col1, col2 = st.columns(2)
@@ -122,8 +136,10 @@ st.query_params.update({
     "o2": o2, "he": he, "depth": depth,
     "auto_time": int(auto_time), "manual_bt": manual_bt_val or 31,
     "bgp": back_gas_pressure, "bgv": back_gas_vol,
-    "d50p": deco_50_pressure, "d50v": deco_50_vol,
-    "do2p": deco_o2_pressure, "do2v": deco_o2_vol,
+    "lp": deco_50_pressure, "lv": deco_50_vol,
+    "rp": deco_o2_pressure, "rv": deco_o2_vol,
+    "lo2": lean_o2, "lhe": lean_he, "lsw": lean_switch,
+    "ro2": rich_o2, "rhe": rich_he, "rsw": rich_switch,
     "gfl": int(gf_low * 100), "gfh": int(gf_high * 100),
     "dr": descent_rate, "ar": ascent_rate,
     "sdrill": int(enable_stop),
@@ -135,13 +151,16 @@ st.query_params.update({
 
 # ─── Compute ──────────────────────────────────────────────────────────────────
 @st.cache_data
-def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd):
+def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd,
+                  lean_gas, lean_switch, rich_gas, rich_switch):
     return find_max_bottom_time(
         depth, back_gas,
         back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
         back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
         gf_low=gfl, gf_high=gfh, descent_rate=dr, ascent_rate=ar,
         sac_bottom=sb, sac_deco=sd,
+        lean_gas=lean_gas, lean_switch=lean_switch,
+        rich_gas=rich_gas, rich_switch=rich_switch,
     )
 
 
@@ -149,7 +168,8 @@ _EMERGENCY_ASCENT_RATE = 18  # m/min — fast but survivable
 
 
 @st.cache_data
-def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd, dst):
+def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd, dst,
+                       lean_gas, lean_switch, rich_gas, rich_switch):
     D = depth
     descent_stops = list(dst) if dst else None
     scenario_defs = [
@@ -157,10 +177,10 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
         (D,     T + 3,  False,    "Longer"),
         (D + 3, T,      False,    "Deeper"),
         (D + 3, T + 3,  False,    "D & L"),
-        (D,     T,      "ean50",  "no 50%"),
-        (D,     T,      "o2",     "no O2"),
-        (D + 3, T + 3,  "ean50",  "no 50% (D)"),
-        (D + 3, T + 3,  "o2",     "no O2 (D)"),
+        (D,     T,      "lean",   "no lean"),
+        (D,     T,      "rich",   "no rich"),
+        (D + 3, T + 3,  "lean",   "no lean (D)"),
+        (D + 3, T + 3,  "rich",   "no rich (D)"),
         (D,     10,     False,    "Bounce"),
     ]
     results = []
@@ -173,6 +193,8 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
             gf_low=gfl, gf_high=gfh,
             descent_rate=dr, ascent_rate=ar,
             sac_bottom=sb, sac_deco=sd,
+            lean_gas=lean_gas, lean_switch=lean_switch,
+            rich_gas=rich_gas, rich_switch=rich_switch,
             descent_stops=descent_stops,
         )
         r["leave_time"] = bt
@@ -188,6 +210,8 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
         gf_low=0.99, gf_high=0.99,
         descent_rate=dr, ascent_rate=_EMERGENCY_ASCENT_RATE,
         sac_bottom=sb, sac_deco=sd,
+        lean_gas=lean_gas, lean_switch=lean_switch,
+        rich_gas=rich_gas, rich_switch=rich_switch,
         descent_stops=descent_stops,
     )
     emerg["leave_time"] = T
@@ -201,7 +225,8 @@ with st.spinner("Computing…"):
     T = (
         _get_max_time(depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
                       back_gas_vol, deco_50_vol, deco_o2_vol,
-                      gf_low, gf_high, descent_rate, ascent_rate, sac_bottom, sac_deco)
+                      gf_low, gf_high, descent_rate, ascent_rate, sac_bottom, sac_deco,
+                      (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch)
         if auto_time else manual_bt_val
     )
     results, scenario_defs = _compute_scenarios(
@@ -210,6 +235,7 @@ with st.spinner("Computing…"):
         back_gas_vol, deco_50_vol, deco_o2_vol,
         gf_low, gf_high, descent_rate, ascent_rate, sac_bottom, sac_deco,
         descent_stops_tuple,
+        (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
     )
 
 # ─── Header ───────────────────────────────────────────────────────────────────
@@ -233,9 +259,9 @@ all_stop_depths = sorted(
 # Determine depth rows
 depth_set = sorted({r["depth"] for r in results}, reverse=True)
 
-# Track which labels need row coloring
-o2_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if sd <= _DECO_O2_SWITCH_DEPTH}
-ean50_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if _DECO_O2_SWITCH_DEPTH < sd <= _DECO_50_SWITCH_DEPTH}
+# Track which labels need cell coloring based on configured switch depths
+rich_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if sd <= rich_switch}
+lean_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if rich_switch < sd <= lean_switch}
 
 table_rows = {}
 
@@ -273,12 +299,12 @@ table_rows["PO2"] = [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f
 table_rows["Gas density"] = [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth']):.2f} g/L" for r in results]
 table_rows["   "] = [""] * len(results)
 table_rows["Back gas left"] = [f"{r['back_remaining_bar']:.0f} bar" for r in results]
-table_rows["EAN50"] = [
-    "--" if r["deco_gases_lost"] in (True, "ean50") else f"{r['ean50_remaining_bar']:.0f} bar"
+table_rows[f"Lean ({lean_o2}/{lean_he})"] = [
+    "--" if r["deco_gases_lost"] in (True, "lean") else f"{r['lean_remaining_bar']:.0f} bar"
     for r in results
 ]
-table_rows["O2"] = [
-    "--" if r["deco_gases_lost"] in (True, "o2") else f"{r['o2_remaining_bar']:.0f} bar"
+table_rows[f"Rich ({rich_o2}/{rich_he})"] = [
+    "--" if r["deco_gases_lost"] in (True, "rich") else f"{r['rich_remaining_bar']:.0f} bar"
     for r in results
 ]
 
@@ -286,15 +312,23 @@ df = pd.DataFrame(table_rows, index=col_labels).T
 df = df.reset_index()
 df = df.rename(columns={"index": ""})
 
-def _color_table_rows(row):
-    label = row.iloc[0]
-    if label in o2_row_labels:
-        return ["background-color: rgba(0,180,0,0.18)"] * len(row)
-    elif label in ean50_row_labels:
-        return ["background-color: rgba(200,200,0,0.18)"] * len(row)
-    return [""] * len(row)
+col_to_lost = {label: r["deco_gases_lost"] for r, label in zip(results, col_labels)}
 
-styled_df = df.style.apply(_color_table_rows, axis=1)
+def _color_cells(data):
+    styles = pd.DataFrame("", index=data.index, columns=data.columns)
+    for i in range(len(data)):
+        row_label = data.iloc[i, 0]
+        for j, col_name in enumerate(data.columns):
+            if j == 0:
+                continue
+            lost = col_to_lost.get(col_name, False)
+            if row_label in rich_row_labels and lost not in (True, "rich"):
+                styles.iloc[i, j] = "background-color: rgba(0,180,0,0.18)"
+            elif row_label in lean_row_labels and lost not in (True, "lean"):
+                styles.iloc[i, j] = "background-color: rgba(200,200,0,0.18)"
+    return styles
+
+styled_df = df.style.apply(_color_cells, axis=None)
 st.dataframe(
     styled_df,
     column_config={"": st.column_config.TextColumn(width="medium")},
@@ -404,23 +438,23 @@ if cp:
 
 # ── Gas switch depth markers ──────────────────────────────────────────────────
 fig.add_hline(
-    y=_DECO_50_SWITCH_DEPTH,
+    y=lean_switch,
     line=dict(color="#56b84b", width=1, dash="dot"),
-    annotation_text=f"EAN50 @ {_DECO_50_SWITCH_DEPTH}m",
+    annotation_text=f"Lean {lean_o2}/{lean_he} @ {lean_switch}m",
     annotation_position="top right",
     row=1, col=1,
 )
 fig.add_hline(
-    y=_DECO_O2_SWITCH_DEPTH,
+    y=rich_switch,
     line=dict(color="#17becf", width=1, dash="dot"),
-    annotation_text=f"O2 @ {_DECO_O2_SWITCH_DEPTH}m",
+    annotation_text=f"Rich {rich_o2}/{rich_he} @ {rich_switch}m",
     annotation_position="top right",
     row=1, col=1,
 )
 
 # ── Gas pressure traces ───────────────────────────────────────────────────────
-GAS_COLORS = {"back": "#4c9be8", "ean50": "#56b84b", "o2": "#17becf"}
-GAS_LABELS = {"back": "Back gas", "ean50": "EAN50", "o2": "O2"}
+GAS_COLORS = {"back": "#4c9be8", "lean": "#56b84b", "rich": "#17becf"}
+GAS_LABELS = {"back": "Back gas", "lean": f"Lean ({lean_o2}/{lean_he})", "rich": f"Rich ({rich_o2}/{rich_he})"}
 
 gpp = sel.get("gas_pressure_profile", {})
 for gas_key, color in GAS_COLORS.items():
@@ -512,8 +546,8 @@ def _build_csv_bytes():
     w.writerow(["Gas density g/L"] + [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth']):.2f}" for r in results])
     w.writerow([])
     w.writerow(["Back gas left"] + [f"{r['back_remaining_bar']:.0f}" for r in results])
-    w.writerow(["EAN50"] + ["--" if r["deco_gases_lost"] in (True, "ean50") else f"{r['ean50_remaining_bar']:.0f}" for r in results])
-    w.writerow(["O2"] + ["--" if r["deco_gases_lost"] in (True, "o2") else f"{r['o2_remaining_bar']:.0f}" for r in results])
+    w.writerow([f"Lean ({lean_o2}/{lean_he})"] + ["--" if r["deco_gases_lost"] in (True, "lean") else f"{r['lean_remaining_bar']:.0f}" for r in results])
+    w.writerow([f"Rich ({rich_o2}/{rich_he})"] + ["--" if r["deco_gases_lost"] in (True, "rich") else f"{r['rich_remaining_bar']:.0f}" for r in results])
     w.writerow([])
     w.writerow(["ASSUMPTIONS"])
     w.writerow(["SAC", f"{sac_bottom} L/min (bottom)", f"{sac_deco} L/min (deco)"])
@@ -524,8 +558,8 @@ def _build_csv_bytes():
     hot = (273.15 + FILL_TEMP_C) / (273.15 + WATER_TEMP_C)
     w.writerow([f"Hot fill ({FILL_TEMP_C}°C→{WATER_TEMP_C}°C)",
                 f"back {back_gas_pressure * hot:.0f} bar",
-                f"EAN50 {deco_50_pressure * hot:.0f} bar",
-                f"O2 {deco_o2_pressure * hot:.0f} bar"])
+                f"lean {deco_50_pressure * hot:.0f} bar",
+                f"rich {deco_o2_pressure * hot:.0f} bar"])
     return buf.getvalue().encode("utf-8-sig")
 
 
