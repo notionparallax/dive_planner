@@ -42,61 +42,104 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ─── URL query param helpers ──────────────────────────────────────────────────
+_qp = st.query_params
+
+def _qpi(key, default):
+    try: return int(_qp[key])
+    except: return default
+
+def _qpf(key, default):
+    try: return float(_qp[key])
+    except: return default
+
+def _qpb(key, default):
+    try: return _qp[key].lower() in ('1', 'true', 'yes')
+    except: return default
+
+
 # ─── Sidebar inputs ───────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("🤿 Dive Planner")
 
     st.subheader("Back Gas")
     col1, col2 = st.columns(2)
-    o2 = col1.number_input("O2%", min_value=4, max_value=40, value=21, step=1)
-    he = col2.number_input("He%", min_value=0, max_value=90, value=0, step=1)
+    o2 = col1.number_input("O2%", min_value=4, max_value=40, value=_qpi("o2", 21), step=1)
+    he = col2.number_input("He%", min_value=0, max_value=90, value=_qpi("he", 0), step=1)
     back_gas = (int(o2), int(he))
 
     st.subheader("Depth & Time")
-    depth = int(st.number_input("Depth (m)", min_value=10, max_value=80, value=48, step=1))
-    auto_time = st.checkbox("Auto bottom time", value=True,
-                            help="Find max safe bottom time by rule of thirds")
+    depth = int(st.number_input("Depth (m)", min_value=10, max_value=80, value=_qpi("depth", 48), step=1))
+    auto_time = st.checkbox("Auto bottom time", value=_qpb("auto_time", True),
+                            help="Find max bottom time where all contingency scenarios (deeper, longer, lost deco gas) have gas remaining")
     manual_bt_val = None
     if not auto_time:
-        manual_bt_val = int(st.number_input("Bottom time (min)", min_value=5, max_value=120, value=31, step=1))
+        manual_bt_val = int(st.number_input("Bottom time (min)", min_value=5, max_value=120, value=_qpi("manual_bt", 31), step=1))
 
     st.subheader("Cylinders")
-    col1, col2, col3 = st.columns(3)
-    back_gas_pressure = int(col1.number_input("Back (bar)", min_value=150, max_value=300, value=230, step=5))
-    deco_50_pressure = int(col2.number_input("EAN50 (bar)", min_value=100, max_value=250, value=200, step=5))
-    deco_o2_pressure = int(col3.number_input("O2 (bar)", min_value=100, max_value=250, value=200, step=5))
+    cyl_col1, cyl_col2, cyl_col3 = st.columns(3)
+    with cyl_col1:
+        st.markdown("**Back gas**")
+        back_gas_pressure = int(st.number_input("Bar", min_value=150, max_value=300, value=_qpi("bgp", 230), step=5, key="bgp"))
+        back_gas_vol = st.number_input("Litres", min_value=3.0, max_value=30.0, value=float(_qpf("bgv", 24.4)), step=0.1, key="bgv", format="%.1f")
+    with cyl_col2:
+        st.markdown("**EAN50**")
+        deco_50_pressure = int(st.number_input("Bar", min_value=100, max_value=250, value=_qpi("d50p", 200), step=5, key="d50p"))
+        deco_50_vol = st.number_input("Litres", min_value=3.0, max_value=20.0, value=float(_qpf("d50v", 11.1)), step=0.1, key="d50v", format="%.1f")
+    with cyl_col3:
+        st.markdown("**O2**")
+        deco_o2_pressure = int(st.number_input("Bar", min_value=100, max_value=250, value=_qpi("do2p", 200), step=5, key="do2p"))
+        deco_o2_vol = st.number_input("Litres", min_value=3.0, max_value=20.0, value=float(_qpf("do2v", 11.1)), step=0.1, key="do2v", format="%.1f")
 
     st.subheader("Deco Model")
     col1, col2 = st.columns(2)
-    gf_low = col1.number_input("GF low %", min_value=10, max_value=100, value=50, step=5) / 100
-    gf_high = col2.number_input("GF high %", min_value=10, max_value=100, value=80, step=5) / 100
+    gf_low = col1.number_input("GF low %", min_value=10, max_value=100, value=_qpi("gfl", 50), step=5) / 100
+    gf_high = col2.number_input("GF high %", min_value=10, max_value=100, value=_qpi("gfh", 80), step=5) / 100
 
     st.subheader("Rates")
     col1, col2 = st.columns(2)
-    descent_rate = int(col1.number_input("Descent (m/min)", min_value=5, max_value=40, value=20, step=1))
-    ascent_rate = int(col2.number_input("Ascent (m/min)", min_value=3, max_value=20, value=10, step=1))
+    descent_rate = int(col1.number_input("Descent (m/min)", min_value=5, max_value=40, value=_qpi("dr", 20), step=1))
+    ascent_rate = int(col2.number_input("Ascent (m/min)", min_value=3, max_value=20, value=_qpi("ar", 10), step=1))
 
     st.subheader("Descent Stop (S-drill)")
-    enable_stop = st.checkbox("Enable S-drill stop")
+    enable_stop = st.checkbox("Enable S-drill stop", value=_qpb("sdrill", False))
     descent_stops_tuple = None
+    s_depth = _qpi("sd", 5)
+    s_time = _qpi("st", 1)
     if enable_stop:
         col1, col2 = st.columns(2)
-        s_depth = int(col1.number_input("Depth (m)", min_value=3, max_value=20, value=5, step=1))
-        s_time = int(col2.number_input("Duration (min)", min_value=1, max_value=30, value=1, step=1))
+        s_depth = int(col1.number_input("Depth (m)", min_value=3, max_value=20, value=s_depth, step=1))
+        s_time = int(col2.number_input("Duration (min)", min_value=1, max_value=30, value=s_time, step=1))
         descent_stops_tuple = ((s_depth, s_time),)
 
     st.subheader("Gas Consumption")
     col1, col2 = st.columns(2)
-    sac_bottom = int(col1.number_input("SAC bottom (L/min)", min_value=10, max_value=40, value=20, step=1))
-    sac_deco = int(col2.number_input("SAC deco (L/min)", min_value=10, max_value=30, value=17, step=1))
+    sac_bottom = int(col1.number_input("SAC bottom (L/min)", min_value=10, max_value=40, value=_qpi("sac_bot", 20), step=1))
+    sac_deco = int(col2.number_input("SAC deco (L/min)", min_value=10, max_value=30, value=_qpi("sac_dec", 17), step=1))
+
+# Write URL params after sidebar
+st.query_params.update({
+    "o2": o2, "he": he, "depth": depth,
+    "auto_time": int(auto_time), "manual_bt": manual_bt_val or 31,
+    "bgp": back_gas_pressure, "bgv": back_gas_vol,
+    "d50p": deco_50_pressure, "d50v": deco_50_vol,
+    "do2p": deco_o2_pressure, "do2v": deco_o2_vol,
+    "gfl": int(gf_low * 100), "gfh": int(gf_high * 100),
+    "dr": descent_rate, "ar": ascent_rate,
+    "sdrill": int(enable_stop),
+    "sd": s_depth if enable_stop else 5,
+    "st": s_time if enable_stop else 1,
+    "sac_bot": sac_bottom, "sac_dec": sac_deco,
+})
 
 
 # ─── Compute ──────────────────────────────────────────────────────────────────
 @st.cache_data
-def _get_max_time(depth, back_gas, bgp, d50p, do2p, gfl, gfh, dr, ar, sb, sd):
+def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd):
     return find_max_bottom_time(
         depth, back_gas,
         back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
+        back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
         gf_low=gfl, gf_high=gfh, descent_rate=dr, ascent_rate=ar,
         sac_bottom=sb, sac_deco=sd,
     )
@@ -106,7 +149,7 @@ _EMERGENCY_ASCENT_RATE = 18  # m/min — fast but survivable
 
 
 @st.cache_data
-def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, gfl, gfh, dr, ar, sb, sd, dst):
+def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd, dst):
     D = depth
     descent_stops = list(dst) if dst else None
     scenario_defs = [
@@ -126,6 +169,7 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, gfl, gfh, dr, ar, sb
             tag, d, bt, deco_gases_lost=lost,
             back_gas=back_gas,
             back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
+            back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
             gf_low=gfl, gf_high=gfh,
             descent_rate=dr, ascent_rate=ar,
             sac_bottom=sb, sac_deco=sd,
@@ -137,16 +181,17 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, gfl, gfh, dr, ar, sb
 
     # Emergency scenario: GF 99/99, fast ascent, main depth/time
     emerg = run_scenario(
-        "Emergency", D, T, deco_gases_lost=False,
+        "Emergency\n(GF99/99)", D, T, deco_gases_lost=False,
         back_gas=back_gas,
         back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
+        back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
         gf_low=0.99, gf_high=0.99,
         descent_rate=dr, ascent_rate=_EMERGENCY_ASCENT_RATE,
         sac_bottom=sb, sac_deco=sd,
         descent_stops=descent_stops,
     )
     emerg["leave_time"] = T
-    emerg["tag"] = "Emergency"
+    emerg["tag"] = "Emergency\n(GF99/99)"
     results.append(emerg)
 
     return results, scenario_defs
@@ -155,12 +200,14 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, gfl, gfh, dr, ar, sb
 with st.spinner("Computing…"):
     T = (
         _get_max_time(depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
+                      back_gas_vol, deco_50_vol, deco_o2_vol,
                       gf_low, gf_high, descent_rate, ascent_rate, sac_bottom, sac_deco)
         if auto_time else manual_bt_val
     )
     results, scenario_defs = _compute_scenarios(
         back_gas, depth, T,
         back_gas_pressure, deco_50_pressure, deco_o2_pressure,
+        back_gas_vol, deco_50_vol, deco_o2_vol,
         gf_low, gf_high, descent_rate, ascent_rate, sac_bottom, sac_deco,
         descent_stops_tuple,
     )
@@ -171,14 +218,6 @@ st.caption(
     f"Max bottom time: **{T}'** | Descent: {descent_rate} m/min | "
     f"Ascent: {ascent_rate} m/min | SAC: {sac_bottom}/{sac_deco} L/min"
 )
-
-# ─── Scenario selector ────────────────────────────────────────────────────────
-tags = [r["tag"] for r in results]
-selected_tag = st.radio(
-    "Scenario (controls ceiling band + gas chart):",
-    tags, horizontal=True, index=0,
-)
-sel = next(r for r in results if r["tag"] == selected_tag)
 
 # ─── Planning table ───────────────────────────────────────────────────────────
 st.subheader("Planning Table")
@@ -194,6 +233,10 @@ all_stop_depths = sorted(
 # Determine depth rows
 depth_set = sorted({r["depth"] for r in results}, reverse=True)
 
+# Track which labels need row coloring
+o2_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if sd <= _DECO_O2_SWITCH_DEPTH}
+ean50_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if _DECO_O2_SWITCH_DEPTH < sd <= _DECO_50_SWITCH_DEPTH}
+
 table_rows = {}
 
 # Depth rows (leave time)
@@ -203,14 +246,9 @@ for dd in depth_set:
         row.append(str(r["bottom_time"]) if r["depth"] == dd else "")
     table_rows[f"{int(dd)}m"] = row
 
-# Deco stop rows
+# Deco stop rows — clean labels without * or - prefix
 for sd in all_stop_depths:
-    if sd <= _DECO_O2_SWITCH_DEPTH:
-        label = f"*{int(sd)}m"
-    elif sd <= _DECO_50_SWITCH_DEPTH:
-        label = f"-{int(sd)}m"
-    else:
-        label = f" {int(sd)}m"
+    label = f"{int(sd)}m"
     row = []
     for r in results:
         st_val = next((t for dp, t in r["deco_stops"] if dp == sd), None)
@@ -222,18 +260,18 @@ for sd in all_stop_depths:
     table_rows[label] = row
 
 # Total time row
-table_rows["*0m"] = [f"{r['total_time']:.0f}" for r in results]
-table_rows["---"] = ["---"] * len(results)
+table_rows["0m"] = [f"{r['total_time']:.0f}" for r in results]
+table_rows[" "] = [""] * len(results)
 table_rows["Total deco"] = [f"{r['total_deco']:.0f}" for r in results]
 table_rows["Runtime"] = [f"{r['total_time']:.0f}" for r in results]
 table_rows["Turn pressure"] = [f"{r['min_gas']['bar_at_turn']:.0f}" for r in results]
-table_rows["---2"] = ["---"] * len(results)
+table_rows["  "] = [""] * len(results)
 table_rows["OTU"] = [f"{r['otu']:.0f}" for r in results]
 table_rows["CNS %"] = [f"{r['cns']:.0f}%" for r in results]
 table_rows["END"] = [f"{(r['depth']+10)*(1-back_gas[1]/100)-10:.0f}m" for r in results]
 table_rows["PO2"] = [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f}" for r in results]
 table_rows["Gas density"] = [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth']):.2f} g/L" for r in results]
-table_rows["---3"] = ["---"] * len(results)
+table_rows["   "] = [""] * len(results)
 table_rows["Back gas left"] = [f"{r['back_remaining_bar']:.0f} bar" for r in results]
 table_rows["EAN50"] = [
     "--" if r["deco_gases_lost"] in (True, "ean50") else f"{r['ean50_remaining_bar']:.0f} bar"
@@ -245,9 +283,32 @@ table_rows["O2"] = [
 ]
 
 df = pd.DataFrame(table_rows, index=col_labels).T
-df.index.name = ""
+df = df.reset_index()
+df = df.rename(columns={"index": ""})
 
-st.dataframe(df, width="stretch")
+def _color_table_rows(row):
+    label = row.iloc[0]
+    if label in o2_row_labels:
+        return ["background-color: rgba(0,180,0,0.18)"] * len(row)
+    elif label in ean50_row_labels:
+        return ["background-color: rgba(200,200,0,0.18)"] * len(row)
+    return [""] * len(row)
+
+styled_df = df.style.apply(_color_table_rows, axis=1)
+st.dataframe(
+    styled_df,
+    column_config={"": st.column_config.TextColumn(width="medium")},
+    hide_index=True,
+    use_container_width=True,
+)
+
+# ─── Scenario selector ────────────────────────────────────────────────────────
+tags = [r["tag"] for r in results]
+selected_tag = st.radio(
+    "Scenario (controls ceiling band + gas chart):",
+    tags, horizontal=True, index=0,
+)
+sel = next(r for r in results if r["tag"] == selected_tag)
 
 # ─── Charts ───────────────────────────────────────────────────────────────────
 st.subheader("Dive Profiles")
@@ -408,7 +469,7 @@ fig.update_yaxes(autorange="reversed", title_text="Depth (m)", row=1, col=1)
 fig.update_yaxes(title_text="Pressure (bar)", rangemode="tozero", row=2, col=1)
 fig.update_xaxes(title_text="Time (min)", row=2, col=1)
 
-st.plotly_chart(fig, width="stretch")
+st.plotly_chart(fig, use_container_width=True)
 
 # ─── CSV download ─────────────────────────────────────────────────────────────
 st.subheader("Export")
@@ -427,7 +488,7 @@ def _build_csv_bytes():
     for dd in sorted({r["depth"] for r in results}, reverse=True):
         w.writerow([f"{int(dd)}m"] + [str(r["bottom_time"]) if r["depth"] == dd else "" for r in results])
     for sd in sorted({d for r in results for d, t in r["deco_stops"]}, reverse=True):
-        lbl = f"*{int(sd)}m" if sd <= _DECO_O2_SWITCH_DEPTH else (f"-{int(sd)}m" if sd <= _DECO_50_SWITCH_DEPTH else f"{int(sd)}m")
+        lbl = f"{int(sd)}m"
         row = [lbl]
         for r in results:
             st_val = next((t for dp, t in r["deco_stops"] if dp == sd), None)
@@ -437,7 +498,7 @@ def _build_csv_bytes():
                 rt = r["stop_runtimes"].get(sd)
                 row.append(f"{rt:.0f} ({st_val:.0f})" if rt is not None else f"({st_val:.0f})")
         w.writerow(row)
-    w.writerow(["*0m"] + [f"{r['total_time']:.0f}" for r in results])
+    w.writerow(["0m"] + [f"{r['total_time']:.0f}" for r in results])
     w.writerow([])
     w.writerow(["Depth"] + [r["depth"] for r in results])
     w.writerow(["Total deco"] + [f"{r['total_deco']:.0f}" for r in results])
@@ -475,3 +536,4 @@ st.download_button(
     file_name=fname,
     mime="text/csv",
 )
+

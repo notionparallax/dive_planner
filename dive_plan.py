@@ -78,6 +78,7 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
                descent_rate=None, ascent_rate=None,
                sac_bottom=None, sac_deco=None,
                back_gas_pressure=None, deco_50_pressure=None, deco_o2_pressure=None,
+               back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
                descent_stops=None):
     """Run a decompression calculation and return a DiveSummary.
 
@@ -97,9 +98,12 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
     _back_gas_pressure = back_gas_pressure if back_gas_pressure is not None else BACK_GAS_PRESSURE
     _deco_50_pressure = deco_50_pressure if deco_50_pressure is not None else DECO_50_PRESSURE
     _deco_o2_pressure = deco_o2_pressure if deco_o2_pressure is not None else DECO_O2_PRESSURE
+    _back_gas_vol = back_gas_vol if back_gas_vol is not None else BACK_GAS_VOL
+    _deco_50_vol = deco_50_vol if deco_50_vol is not None else DECO_50_VOL
+    _deco_o2_vol = deco_o2_vol if deco_o2_vol is not None else DECO_O2_VOL
 
     back_gas_obj = _Gas(o2=_back_gas[0], he=_back_gas[1], label='back')
-    back_cyl_obj = _Cylinder(volume_litres=BACK_GAS_VOL, fill_bar=_back_gas_pressure)
+    back_cyl_obj = _Cylinder(volume_litres=_back_gas_vol, fill_bar=_back_gas_pressure)
 
     if deco_cylinders_config is not None:
         _deco_gases_raw = deco_cylinders_config
@@ -114,11 +118,11 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
     deco_cyl_objs = []
     for o2, he, sd in _deco_gases_raw:
         if o2 == 50 and he == 0:
-            label, vol, pressure = 'ean50', DECO_50_VOL, _deco_50_pressure
+            label, vol, pressure = 'ean50', _deco_50_vol, _deco_50_pressure
         elif o2 == 100 and he == 0:
-            label, vol, pressure = 'o2', DECO_O2_VOL, _deco_o2_pressure
+            label, vol, pressure = 'o2', _deco_o2_vol, _deco_o2_pressure
         else:
-            label, vol, pressure = f'tx{o2}/{he}', DECO_50_VOL, _deco_50_pressure
+            label, vol, pressure = f'tx{o2}/{he}', _deco_50_vol, _deco_50_pressure
         deco_gas_objs.append(_Gas(o2=o2, he=he, switch_depth=float(sd), label=label))
         deco_cyl_objs.append(_Cylinder(volume_litres=vol, fill_bar=pressure))
 
@@ -196,6 +200,7 @@ def calculate_min_gas_and_turn_from_summary(summary, back_gas_pressure, back_gas
 def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
                  back_gas=None,
                  back_gas_pressure=None, deco_50_pressure=None, deco_o2_pressure=None,
+                 back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
                  gf_low=None, gf_high=None, descent_rate=None, ascent_rate=None,
                  sac_bottom=None, sac_deco=None,
                  descent_stops=None):
@@ -216,6 +221,9 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
     _back_gas_pressure = back_gas_pressure if back_gas_pressure is not None else BACK_GAS_PRESSURE
     _deco_50_pressure = deco_50_pressure if deco_50_pressure is not None else DECO_50_PRESSURE
     _deco_o2_pressure = deco_o2_pressure if deco_o2_pressure is not None else DECO_O2_PRESSURE
+    _back_gas_vol = back_gas_vol if back_gas_vol is not None else BACK_GAS_VOL
+    _deco_50_vol = deco_50_vol if deco_50_vol is not None else DECO_50_VOL
+    _deco_o2_vol = deco_o2_vol if deco_o2_vol is not None else DECO_O2_VOL
     _cfg = cfg or {}
     _sac_bottom = sac_bottom if sac_bottom is not None else (_cfg.get('sac_bottom') if _cfg.get('sac_bottom') is not None else SAC_BOTTOM)
     _sac_deco = sac_deco if sac_deco is not None else (_cfg.get('sac_deco') if _cfg.get('sac_deco') is not None else SAC_DECO)
@@ -308,6 +316,9 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             back_gas_pressure=_back_gas_pressure,
             deco_50_pressure=_deco_50_pressure,
             deco_o2_pressure=_deco_o2_pressure,
+            back_gas_vol=_back_gas_vol,
+            deco_50_vol=_deco_50_vol,
+            deco_o2_vol=_deco_o2_vol,
             descent_stops=descent_stops,
         )
 
@@ -328,7 +339,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         min_gas = calculate_min_gas_and_turn_from_summary(
             summary,
             back_gas_pressure=_back_gas_pressure,
-            back_gas_vol=BACK_GAS_VOL,
+            back_gas_vol=_back_gas_vol,
             sac_bottom=_sac_bottom,
         )
 
@@ -755,6 +766,7 @@ def print_gas_optimization(depth, bottom_time, target_end=30,
 def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         back_gas_pressure=None, deco_50_pressure=None,
                         deco_o2_pressure=None,
+                        back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
                         gf_low=None, gf_high=None, descent_rate=None,
                         ascent_rate=None, sac_bottom=None, sac_deco=None):
     """
@@ -779,6 +791,9 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
     _ascent_rate = ascent_rate if ascent_rate is not None else ASCENT_RATE
     _sac_bottom = sac_bottom if sac_bottom is not None else SAC_BOTTOM
     _sac_deco = sac_deco if sac_deco is not None else SAC_DECO
+    _back_gas_vol = back_gas_vol if back_gas_vol is not None else BACK_GAS_VOL
+    _deco_50_vol = deco_50_vol if deco_50_vol is not None else DECO_50_VOL
+    _deco_o2_vol = deco_o2_vol if deco_o2_vol is not None else DECO_O2_VOL
     thirds_pressure = _back_gas_pressure * 2 / 3
 
     lo, hi = 1, 120
@@ -806,6 +821,9 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                      back_gas_pressure=_back_gas_pressure,
                                      deco_50_pressure=_deco_50_pressure,
                                      deco_o2_pressure=_deco_o2_pressure,
+                                     back_gas_vol=_back_gas_vol,
+                                     deco_50_vol=_deco_50_vol,
+                                     deco_o2_vol=_deco_o2_vol,
                                      gf_low=_gf_low, gf_high=_gf_high,
                                      descent_rate=_descent_rate, ascent_rate=_ascent_rate,
                                      sac_bottom=_sac_bottom, sac_deco=_sac_deco)
@@ -824,6 +842,9 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                  back_gas_pressure=_back_gas_pressure,
                                  deco_50_pressure=_deco_50_pressure,
                                  deco_o2_pressure=_deco_o2_pressure,
+                                 back_gas_vol=_back_gas_vol,
+                                 deco_50_vol=_deco_50_vol,
+                                 deco_o2_vol=_deco_o2_vol,
                                  gf_low=_gf_low, gf_high=_gf_high,
                                  descent_rate=_descent_rate, ascent_rate=_ascent_rate,
                                  sac_bottom=_sac_bottom, sac_deco=_sac_deco)
