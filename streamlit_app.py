@@ -264,8 +264,9 @@ all_stop_depths = sorted(
 depth_set = sorted({r["depth"] for r in results}, reverse=True)
 
 # Track which labels need cell coloring based on configured switch depths
-rich_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if sd <= rich_switch}
-lean_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if rich_switch < sd <= lean_switch}
+# Use round() to match the int-truncated label, avoiding float precision issues
+rich_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if round(sd) <= rich_switch}
+lean_row_labels = {f"{int(sd)}m" for sd in all_stop_depths if rich_switch < round(sd) <= lean_switch}
 
 table_rows = {}
 
