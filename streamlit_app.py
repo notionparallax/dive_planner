@@ -32,6 +32,7 @@ from dive_plan import (  # noqa: E402
     find_max_bottom_time,
     run_scenario,
 )
+from gas_planning import calc_switch_depth  # noqa: E402
 
 st.set_page_config(
     page_title="Dive Planner",
@@ -73,23 +74,20 @@ with st.sidebar:
         "Gas":     ["Back",  "Lean",  "Rich"],
         "O2%":     [_qpi("o2",  21),  _qpi("lo2", 50),  _qpi("ro2", 100)],
         "He%":     [_qpi("he",   0),  _qpi("lhe",  0),  _qpi("rhe",   0)],
-        "Switch m":[-1,              _qpi("lsw", 21),  _qpi("rsw",   6)],
         "Bar":     [_qpi("bgp", 230), _qpi("lp",  200), _qpi("rp",  200)],
         "Litres":  [_qpf("bgv", 24.4),_qpf("lv",  11.1),_qpf("rv",  11.1)],
     })
     _gas_table = st.data_editor(
         _gas_defaults,
         column_config={
-            "Gas":      st.column_config.TextColumn(disabled=True, width="small"),
-            "O2%":      st.column_config.NumberColumn(min_value=4,   max_value=100, step=1,   format="%d", width="small"),
-            "He%":      st.column_config.NumberColumn(min_value=0,   max_value=90,  step=1,   format="%d", width="small"),
-            "Switch m": st.column_config.NumberColumn(min_value=-1,  max_value=40,  step=3,   format="%d", width="small",
-                                                       help="Depth to switch to this gas. -1 = back gas (not applicable)."),
-            "Bar":      st.column_config.NumberColumn(min_value=50,  max_value=300, step=5,   format="%d", width="small"),
-            "Litres":   st.column_config.NumberColumn(min_value=3.0, max_value=30.0,step=0.1, format="%.1f", width="small"),
+            "Gas":    st.column_config.TextColumn(disabled=True, width="small"),
+            "O2%":    st.column_config.NumberColumn(min_value=4,   max_value=100, step=1,   format="%d", width="small"),
+            "He%":    st.column_config.NumberColumn(min_value=0,   max_value=90,  step=1,   format="%d", width="small"),
+            "Bar":    st.column_config.NumberColumn(min_value=50,  max_value=300, step=5,   format="%d", width="small"),
+            "Litres": st.column_config.NumberColumn(min_value=3.0, max_value=30.0,step=0.1, format="%.1f", width="small"),
         },
         hide_index=True,
-        width='stretch',
+        use_container_width=True,
         key="gas_table",
         num_rows="fixed",
     )
@@ -99,12 +97,12 @@ with st.sidebar:
     back_gas_vol = float(_gas_table.iloc[0]["Litres"])
     lean_o2      = int(_gas_table.iloc[1]["O2%"])
     lean_he      = int(_gas_table.iloc[1]["He%"])
-    lean_switch  = int(_gas_table.iloc[1]["Switch m"])
+    lean_switch  = int(calc_switch_depth(lean_o2 / 100.0))
     deco_50_pressure = int(_gas_table.iloc[1]["Bar"])
     deco_50_vol  = float(_gas_table.iloc[1]["Litres"])
     rich_o2      = int(_gas_table.iloc[2]["O2%"])
     rich_he      = int(_gas_table.iloc[2]["He%"])
-    rich_switch  = int(_gas_table.iloc[2]["Switch m"])
+    rich_switch  = int(calc_switch_depth(rich_o2 / 100.0))
     deco_o2_pressure = int(_gas_table.iloc[2]["Bar"])
     deco_o2_vol  = float(_gas_table.iloc[2]["Litres"])
     back_gas = (o2, he)
@@ -142,8 +140,8 @@ st.query_params.update({
     "bgp": back_gas_pressure, "bgv": back_gas_vol,
     "lp": deco_50_pressure, "lv": deco_50_vol,
     "rp": deco_o2_pressure, "rv": deco_o2_vol,
-    "lo2": lean_o2, "lhe": lean_he, "lsw": lean_switch,
-    "ro2": rich_o2, "rhe": rich_he, "rsw": rich_switch,
+    "lo2": lean_o2, "lhe": lean_he,
+    "ro2": rich_o2, "rhe": rich_he,
     "gfl": int(gf_low * 100), "gfh": int(gf_high * 100),
     "dr": descent_rate, "ar": ascent_rate,
     "sdrill": int(enable_stop),
@@ -249,31 +247,59 @@ st.caption(
     f"Ascent: {ascent_rate} m/min | SAC: {sac_bottom}/{sac_deco} L/min"
 )
 
-# ─── Safety warnings ─────────────────────────────────────────────────────────
+# ─── Safety warnings + column header emojis ──────────────────────────────────
 _CNS_WARN = 80.0
 _DENSITY_WARN = 6.2  # g/L — GUE/WKPP limit
+_MAX_PPO2_BOTTOM = 1.4
 
-_warnings = []
-for r in results:
-    tag = r["tag"]
+# Per-result warning strings (for expander) and emoji sets (for column headers)
+_col_warnings: list[list[str]] = [[] for _ in results]
+for i, r in enumerate(results):
+    tag = r["tag"].replace("\n", " ")
     if r["cns"] >= _CNS_WARN:
-        _warnings.append(f"⚠️ **{tag}**: CNS {r['cns']:.0f}% (limit 80%)")
+        _col_warnings[i].append(f"⚠️ **{tag}**: CNS {r['cns']:.0f}% (limit 80%)")
     if r["max_gas_density"] >= _DENSITY_WARN:
-        _warnings.append(
+        _col_warnings[i].append(
             f"⚠️ **{tag}**: gas density {r['max_gas_density']:.2f} g/L "
             f"(GUE/WKPP limit {_DENSITY_WARN} g/L)"
         )
+    # Back gas ppO2 at depth
+    abs_p = SURFACE_PRESSURE + r["depth"] / 10.0
+    ppo2 = (back_gas[0] / 100.0) * abs_p
+    if ppo2 > _MAX_PPO2_BOTTOM:
+        _col_warnings[i].append(
+            f"⚠️ **{tag}**: back gas ppO₂ {ppo2:.2f} bar at {r['depth']}m "
+            f"(limit {_MAX_PPO2_BOTTOM} bar)"
+        )
 
-if _warnings:
-    with st.expander(f"⚠️ {len(_warnings)} warning(s)", expanded=True):
-        for w in _warnings:
+# Constraining scenario: first 8 results match the auto-timer contingency scenarios
+_constraint_scenarios = results[:8]
+def _gas_margin(r):
+    lost = r.get("deco_gases_lost", False)
+    margins = [r["back_remaining_bar"]]
+    if lost not in (True, "lean"):
+        margins.append(r["lean_remaining_bar"])
+    if lost not in (True, "rich"):
+        margins.append(r["rich_remaining_bar"])
+    return min(margins)
+
+_constraint_idx = min(range(len(_constraint_scenarios)), key=lambda i: _gas_margin(_constraint_scenarios[i]))
+
+all_warnings = [w for ws in _col_warnings for w in ws]
+if all_warnings:
+    with st.expander(f"⚠️ {len(all_warnings)} warning(s)", expanded=True):
+        for w in all_warnings:
             st.markdown(w)
+
+# Build column labels with warning emoji and constraining scenario marker
+col_labels = []
+for i, r in enumerate(results):
+    prefix = "🖐️ " if i == _constraint_idx else ("⚠️ " if _col_warnings[i] else "")
+    col_labels.append(f"{prefix}{r['leave_time']}'\n{r['depth']}m\n{r['tag']}")
 
 # ─── Planning table ───────────────────────────────────────────────────────────
 st.subheader("Planning Table")
 
-# Build header row
-col_labels = [f"{r['leave_time']}'\n{r['depth']}m\n{r['tag']}" for r in results]
 
 # Determine all deco stop depths across all scenarios
 all_stop_depths = sorted(
@@ -366,9 +392,12 @@ def _color_cells(data):
     return styles
 
 styled_df = df.style.apply(_color_cells, axis=None)
+_col_config = {"": st.column_config.TextColumn(width="medium")}
+for lbl in col_labels:
+    _col_config[lbl] = st.column_config.TextColumn(width="small")
 st.dataframe(
     styled_df,
-    column_config={"": st.column_config.TextColumn(width="medium")},
+    column_config=_col_config,
     hide_index=True,
     width='stretch',
 )

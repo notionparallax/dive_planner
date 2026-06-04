@@ -175,11 +175,17 @@ def calculate_min_gas_and_turn_from_summary(summary, back_gas_pressure, back_gas
     depth = summary.max_depth
     abs_p_bottom = SURFACE_PRESSURE + depth / 10.0
 
-    # Gas used during descent + bottom (before ascent starts)
-    if len(summary.profile) >= 3:
-        descent_time = summary.profile[1][0]
-        bottom_leave_time = summary.profile[2][0]
+    # Gas used during descent + bottom (before ascent starts).
+    # Find profile points at max_depth (not hardcoded indices, which break with S-drill stops).
+    max_d = summary.max_depth
+    bottom_pts = [(t, d) for t, d in summary.profile if abs(d - max_d) < 0.1]
+    if len(bottom_pts) >= 2:
+        descent_time = bottom_pts[0][0]
+        bottom_leave_time = bottom_pts[1][0]
         bottom_duration = bottom_leave_time - descent_time
+    elif len(bottom_pts) == 1:
+        descent_time = bottom_pts[0][0]
+        bottom_duration = 0.0
     else:
         descent_time = depth / DESCENT_RATE
         bottom_duration = 0.0
