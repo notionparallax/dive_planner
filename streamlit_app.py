@@ -124,7 +124,7 @@ with st.sidebar:
     _ar_s_default = _qpf("ar_s", 3.0)
     ascent_rate_shallow = col1.number_input("Ascent shallow (m/min)", min_value=0.5, max_value=10.0,
                                             value=_ar_s_default, step=0.5, format="%.1f",
-                                            help="Ascent rate from 6m to surface. 3 m/min is a common shallow ascent rate.")
+                                            help="Ascent rate from 6m to surface.")
     # Build segmented ascent profile: fast to 6m, slow 6m→surface
     if ascent_rate_shallow != ascent_rate:
         ascent_rate_profile = [(6, float(ascent_rate)), (0, float(ascent_rate_shallow))]

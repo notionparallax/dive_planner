@@ -14,11 +14,6 @@
 - **fill cost** if we enter a price per litre for 02 and he, and a blending charge for trimix and another for nitrox, it will show a cost for filling these tanks for this dive. This will disregard any gas already in the tanks, but we can do that as a later thing. This can probably go down at the bottom next to the export buttons
 - **Segmented ascent speeds** we should be able to set ascent speeds for the ascent to 6m and a different ascent speed for the 6m to the surface segment. The 6 to 0 section should be able to go in 0.5m/minute increments.
 
-  **Library spec for decodaitengu:** Currently `plan_dive()` accepts a single `ascent_rate` parameter (float, m/min). To support segmented ascent the library would need to accept either:
-  - `ascent_rate: float | list[tuple[float, float]]` — where each tuple is `(max_depth_m, rate_m_per_min)` applied from that depth to the next segment, e.g. `[(6, 10), (0, 0.5)]` means "10 m/min until 6m, then 0.5 m/min to surface", OR
-  - Two dedicated params: `ascent_rate_deep` (m/min, applies from bottom to `last_stop_depth`) and `ascent_rate_shallow` (m/min, applies from `last_stop_depth` to surface), with `ascent_rate` kept as a fallback for both.
-  The second option is simpler to implement and document. The slow shallow rate (0.5–3 m/min) significantly extends deco time and affects CNS/OTU, so ceiling calculations must account for it properly — the deco algorithm should treat the slow ascent segment as additional time at each shallow stop depth..
-
 ## Multi-level Dives 💡
 
 Allow a stepped profile (e.g. 40m → 30m → 20m), common in wreck diving. The descent stops mechanism already exists; the main work is:
