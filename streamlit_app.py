@@ -249,8 +249,8 @@ st.caption(
 
 # ─── Safety warnings + column header emojis ──────────────────────────────────
 _CNS_WARN = 80.0
-_DENSITY_WARN = 6.2  # g/L — GUE/WKPP limit
-_MAX_PPO2_BOTTOM = 1.4
+_DENSITY_WARN = 6.2   # g/L — GUE/WKPP limit
+_MAX_PPO2_BOTTOM = 1.5  # warn above this; 1.4 is the guideline but +3m contingency overage is expected
 
 # Per-result warning strings (for expander) and emoji sets (for column headers)
 _col_warnings: list[list[str]] = [[] for _ in results]
@@ -393,8 +393,17 @@ def _color_cells(data):
 
 styled_df = df.style.apply(_color_cells, axis=None)
 _col_config = {"": st.column_config.TextColumn(width="medium")}
-for lbl in col_labels:
-    _col_config[lbl] = st.column_config.TextColumn(width="small")
+for i, lbl in enumerate(col_labels):
+    help_parts = []
+    if i == _constraint_idx:
+        help_parts.append("🖐️ Constraining scenario — tightest gas margin")
+    for w in _col_warnings[i]:
+        # strip markdown bold for tooltip
+        help_parts.append(w.replace("**", ""))
+    _col_config[lbl] = st.column_config.TextColumn(
+        width="small",
+        help="\n\n".join(help_parts) if help_parts else None,
+    )
 st.dataframe(
     styled_df,
     column_config=_col_config,
