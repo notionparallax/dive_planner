@@ -29,6 +29,7 @@ from dive_plan import (  # noqa: E402
     SURFACE_PRESSURE,
     WATER_TEMP_C,
     _gas_density_gl,
+    calculate_best_mix,
     find_max_bottom_time,
     run_scenario,
 )
@@ -70,10 +71,12 @@ with st.sidebar:
         manual_bt_val = int(st.number_input("Bottom time (min)", min_value=5, max_value=120, value=_qpi("manual_bt", 31), step=1))
 
     st.subheader("Gases & Cylinders")
+    _bm_o2 = st.session_state.pop("_bm_apply_o2", None)
+    _bm_he = st.session_state.pop("_bm_apply_he", None)
     _gas_defaults = pd.DataFrame({
         "Gas":     ["Back",  "Lean",  "Rich"],
-        "O2%":     [_qpi("o2",  21),  _qpi("lo2", 50),  _qpi("ro2", 100)],
-        "He%":     [_qpi("he",   0),  _qpi("lhe",  0),  _qpi("rhe",   0)],
+        "O2%":     [_bm_o2 if _bm_o2 is not None else _qpi("o2",  21),  _qpi("lo2", 50),  _qpi("ro2", 100)],
+        "He%":     [_bm_he if _bm_he is not None else _qpi("he",   0),  _qpi("lhe",  0),  _qpi("rhe",   0)],
         "Bar":     [_qpi("bgp", 230), _qpi("lp",  200), _qpi("rp",  200)],
         "Litres":  [_qpf("bgv", 24.4),_qpf("lv",  11.1),_qpf("rv",  11.1)],
     })
@@ -132,6 +135,31 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     sac_bottom = int(col1.number_input("SAC bottom (L/min)", min_value=10, max_value=40, value=_qpi("sac_bot", 20), step=1))
     sac_deco = int(col2.number_input("SAC deco (L/min)", min_value=10, max_value=30, value=_qpi("sac_dec", 17), step=1))
+
+    with st.expander("🧪 Best Mix Calculator", expanded=False):
+        st.caption(f"Calculate optimal trimix for {depth}m")
+        bm_end = st.number_input(
+            "Target END (m)", min_value=10, max_value=40, value=30, step=1,
+            help="Equivalent Narcotic Depth. GUE standard is 30m. Set lower for a more conservative mix.",
+        )
+        bm_o2_narcotic = st.checkbox(
+            "O₂ is narcotic", value=False,
+            help="If checked, O₂ counts towards narcosis in the END calculation (some agencies use this model).",
+        )
+        bm_po2 = st.number_input(
+            "Max ppO₂ at depth (bar)", min_value=1.0, max_value=1.6, value=1.4, step=0.05, format="%.2f",
+            help="O₂ fraction is set so ppO₂ exactly equals this at the planned depth.",
+        )
+        _bm = calculate_best_mix(depth, target_end=bm_end, max_po2_bottom=bm_po2)
+        st.markdown(
+            f"**Tx {_bm['o2']}/{_bm['he']}** &nbsp;·&nbsp; "
+            f"ppO₂ {_bm['actual_po2']:.2f} bar &nbsp;·&nbsp; "
+            f"END {_bm['actual_end']:.0f}m"
+        )
+        if st.button("Apply to back gas ↑", key="apply_best_mix"):
+            st.session_state["_bm_apply_o2"] = _bm["o2"]
+            st.session_state["_bm_apply_he"] = _bm["he"]
+            st.rerun()
 
     with st.expander("⚙️ Settings", expanded=False):
         st.caption("Warning thresholds")
@@ -600,6 +628,16 @@ fig.add_hline(
     row=2, col=1,
 )
 
+# Rule of thirds — 1/3 of fill pressure is the turn-around point
+thirds_p = back_gas_pressure / 3.0
+fig.add_hline(
+    y=thirds_p,
+    line=dict(color="#f0922b", width=1, dash="dot"),
+    annotation_text=f"⅓: {thirds_p:.0f} bar",
+    annotation_position="bottom right",
+    row=2, col=1,
+)
+
 # ── Layout ────────────────────────────────────────────────────────────────────
 fig.update_layout(
     height=680,
@@ -686,3 +724,44 @@ st.download_button(
     mime="text/csv",
 )
 
+# ─── Fill cost calculator ─────────────────────────────────────────────────────
+with st.expander("💰 Fill Cost Calculator", expanded=False):
+    st.caption("Estimate the cost to fill all cylinders for this dive (ignores any gas already in the tanks)")
+    fc1, fc2, fc3, fc4 = st.columns(4)
+    cost_o2   = fc1.number_input("O₂ per litre",      min_value=0.0, value=_qpf("fc_o2",  0.30), step=0.05, format="%.2f",
+                                  help="Cost per litre of O₂ gas (pure O₂, used in all cylinders)")
+    cost_he   = fc2.number_input("He per litre",       min_value=0.0, value=_qpf("fc_he",  0.50), step=0.05, format="%.2f",
+                                  help="Cost per litre of helium gas")
+    cost_tmix = fc3.number_input("Trimix blend charge", min_value=0.0, value=_qpf("fc_tmix", 5.0), step=0.5,  format="%.2f",
+                                  help="Labour/equipment charge to blend a trimix cylinder")
+    cost_nit  = fc4.number_input("Nitrox blend charge", min_value=0.0, value=_qpf("fc_nit",  2.0), step=0.5,  format="%.2f",
+                                  help="Labour/equipment charge to blend a nitrox (EAN) cylinder")
+
+    def _fill_cost(o2_pct, he_pct, volume_l, pressure_bar, cost_o2, cost_he, cost_tmix, cost_nit):
+        """Cost to fill one cylinder from empty."""
+        total_litres = volume_l * pressure_bar
+        o2_frac = o2_pct / 100.0
+        he_frac = he_pct / 100.0
+        gas_cost = (o2_frac * cost_o2 + he_frac * cost_he) * total_litres
+        blend_charge = cost_tmix if he_pct > 0 else (cost_nit if o2_pct != 21 else 0.0)
+        return gas_cost + blend_charge
+
+    _cylinders_for_cost = [
+        ("Back gas",        back_gas[0],  back_gas[1],  back_gas_vol,    back_gas_pressure),
+        (f"Lean ({lean_o2}/{lean_he})", lean_o2, lean_he, deco_50_vol, deco_50_pressure),
+        (f"Rich ({rich_o2}/{rich_he})", rich_o2, rich_he, deco_o2_vol, deco_o2_pressure),
+    ]
+    total_cost = 0.0
+    cost_rows = []
+    for cyl_name, co2, che, cvol, cpres in _cylinders_for_cost:
+        c = _fill_cost(co2, che, cvol, cpres, cost_o2, cost_he, cost_tmix, cost_nit)
+        total_cost += c
+        cost_rows.append({"Cylinder": cyl_name, "O2%": co2, "He%": che,
+                          "Vol (L)": cvol, "Fill (bar)": cpres, "Cost": round(c, 2)})
+    cost_df = pd.DataFrame(cost_rows)
+    st.dataframe(cost_df, hide_index=True, use_container_width=True,
+                 column_config={"Cost": st.column_config.NumberColumn(format="%.2f")})
+    st.markdown(f"**Total fill cost: {total_cost:.2f}**")
+
+    st.query_params.update({"fc_o2": cost_o2, "fc_he": cost_he,
+                             "fc_tmix": cost_tmix, "fc_nit": cost_nit})
