@@ -800,7 +800,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         gf_low=None, gf_high=None, descent_rate=None,
                         ascent_rate=None, sac_bottom=None, sac_deco=None,
                         lean_gas=None, lean_switch=None,
-                        rich_gas=None, rich_switch=None):
+                        rich_gas=None, rich_switch=None,
+                        min_reserve=10):
     """
     Find the maximum bottom time satisfying the gas rule.
 
@@ -865,13 +866,13 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                      gf_low=_gf_low, gf_high=_gf_high,
                                      descent_rate=_descent_rate, ascent_rate=_ascent_rate,
                                      sac_bottom=_sac_bottom, sac_deco=_sac_deco)
-                    if r['back_remaining_bar'] < 0:
+                    if r['back_remaining_bar'] < min_reserve:
                         ok = False
                         break
-                    if lost not in (True, 'lean') and r['lean_remaining_bar'] < 0:
+                    if lost not in (True, 'lean') and r['lean_remaining_bar'] < min_reserve:
                         ok = False
                         break
-                    if lost not in (True, 'rich') and r['rich_remaining_bar'] < 0:
+                    if lost not in (True, 'rich') and r['rich_remaining_bar'] < min_reserve:
                         ok = False
                         break
             else:

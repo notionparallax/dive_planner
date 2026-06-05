@@ -156,6 +156,11 @@ with st.sidebar:
             min_value=50, max_value=100, value=_qpi("cns_warn", 80), step=5,
             help="Warn if CNS oxygen toxicity reaches this percentage in any scenario. Single-dive limit is 80%; NOAA allows 100% for working divers.",
         )
+        min_gas_reserve = st.number_input(
+            "Minimum gas reserve (bar)",
+            min_value=0, max_value=50, value=_qpi("min_res", 10), step=5,
+            help="No cylinder may go below this pressure in any scenario, including the worst-case contingency. 10 bar is a practical floor — it's not usable gas but confirms the cylinder isn't empty.",
+        )
 
 # Write URL params after sidebar
 st.query_params.update({
@@ -173,14 +178,14 @@ st.query_params.update({
     "st": s_time if enable_stop else 1,
     "sac_bot": sac_bottom, "sac_dec": sac_deco,
     "ppo2_bot": ppo2_bottom, "ppo2_ctol": ppo2_contingency_tol,
-    "dens_lim": density_limit, "cns_warn": cns_warn,
+    "dens_lim": density_limit, "cns_warn": cns_warn, "min_res": min_gas_reserve,
 })
 
 
 # ─── Compute ──────────────────────────────────────────────────────────────────
 @st.cache_data
 def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd,
-                  lean_gas, lean_switch, rich_gas, rich_switch):
+                  lean_gas, lean_switch, rich_gas, rich_switch, min_reserve=10):
     return find_max_bottom_time(
         depth, back_gas,
         back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
@@ -189,6 +194,7 @@ def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, d
         sac_bottom=sb, sac_deco=sd,
         lean_gas=lean_gas, lean_switch=lean_switch,
         rich_gas=rich_gas, rich_switch=rich_switch,
+        min_reserve=min_reserve,
     )
 
 
@@ -254,7 +260,8 @@ with st.spinner("Computing…"):
         _get_max_time(depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
                       back_gas_vol, deco_50_vol, deco_o2_vol,
                       gf_low, gf_high, descent_rate, ascent_rate, sac_bottom, sac_deco,
-                      (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch)
+                      (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
+                      min_gas_reserve)
         if auto_time else manual_bt_val
     )
     results, scenario_defs = _compute_scenarios(

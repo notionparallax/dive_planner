@@ -148,9 +148,19 @@ def calc_ow_min_gas(steps, depth: float, cylinder: CylinderConfig,
     }
 
 
-def calc_switch_depth(o2_frac: float, max_ppo2: float = 1.6) -> float:
-    """Optimal switch depth in metres from ppO2 limit."""
-    return round((max_ppo2 / o2_frac - 1) * 10)
+def calc_switch_depth(o2_frac: float, max_ppo2: float = 1.6, surface_pressure: float = 1.01325) -> int:
+    """MOD in whole metres: deepest depth where this gas stays at or below max_ppo2.
+
+    Uses real surface pressure (1.01325 bar) so EAN50 correctly gives 21m, not 22m.
+    Pure O2 is clamped to minimum 6m — the accepted community convention
+    (ppO2 ≈ 1.61 bar at 6m is universally accepted for O2 deco stops).
+    """
+    import math
+    depth_m = (max_ppo2 / o2_frac - surface_pressure) * 10
+    result = math.floor(depth_m)
+    if o2_frac >= 0.99:  # pure O2: community convention is 6m switch
+        result = max(result, 6)
+    return result
 
 
 def calc_gas_plan(steps, depth: float, back_cylinder: CylinderConfig,
