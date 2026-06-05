@@ -135,20 +135,16 @@ with st.sidebar:
 
     with st.expander("⚙️ Settings", expanded=False):
         st.caption("Warning thresholds")
-        ppo2_working = st.number_input(
-            "ppO₂ working limit (bar)",
-            min_value=1.0, max_value=1.6, value=_qpf("ppo2_work", 1.4), step=0.05, format="%.2f",
-            help="Back gas ppO₂ above this triggers a warning on the main and planned scenarios. GUE standard: 1.4 bar.",
-        )
-        ppo2_absolute = st.number_input(
-            "ppO₂ absolute limit (bar)",
-            min_value=1.0, max_value=1.6, value=_qpf("ppo2_abs", 1.5), step=0.05, format="%.2f",
-            help="ppO₂ above this always triggers a warning regardless of scenario. Hard ceiling: 1.6 bar.",
+        ppo2_bottom = st.number_input(
+            "ppO₂ bottom limit (bar)",
+            min_value=1.0, max_value=1.6, value=_qpf("ppo2_bot", 1.4), step=0.05, format="%.2f",
+            help="Back gas ppO₂ above this triggers a warning on the main dive and standard scenarios. GUE/WKPP standard: 1.4 bar.",
         )
         ppo2_contingency_tol = st.number_input(
             "Contingency ppO₂ tolerance (bar)",
             min_value=0.0, max_value=0.3, value=_qpf("ppo2_ctol", 0.2), step=0.05, format="%.2f",
-            help="Extra tolerance added to the working limit for contingency scenarios (deeper / longer). A +3m contingency naturally pushes ppO₂ ~0.1 bar over the working limit — 0.2 bar gives comfortable headroom.",
+            help=f"Extra headroom added to the bottom limit for contingency scenarios (Deeper / Longer / D&L). "
+                 f"At defaults: contingency limit = {_qpf('ppo2_bot', 1.4):.2f} + {_qpf('ppo2_ctol', 0.2):.2f} = {_qpf('ppo2_bot', 1.4) + _qpf('ppo2_ctol', 0.2):.2f} bar.",
         )
         density_limit = st.number_input(
             "Gas density limit (g/L)",
@@ -176,8 +172,7 @@ st.query_params.update({
     "sd": s_depth if enable_stop else 5,
     "st": s_time if enable_stop else 1,
     "sac_bot": sac_bottom, "sac_dec": sac_deco,
-    "ppo2_work": ppo2_working, "ppo2_abs": ppo2_absolute,
-    "ppo2_ctol": ppo2_contingency_tol,
+    "ppo2_bot": ppo2_bottom, "ppo2_ctol": ppo2_contingency_tol,
     "dens_lim": density_limit, "cns_warn": cns_warn,
 })
 
@@ -282,11 +277,12 @@ st.caption(
 _CNS_WARN = float(cns_warn)
 _DENSITY_WARN = float(density_limit)
 
-# ppO2 limit: contingency scenarios get extra tolerance on top of the working limit
+# ppO2 limit: contingency scenarios get the bottom limit + tolerance
 _CONTINGENCY_TAGS = {"Longer", "Deeper", "D & L", "no lean%(D)", "no rich%(D)"}
 def _ppo2_limit_for(tag: str) -> float:
-    base = float(ppo2_absolute) if any(t in tag for t in _CONTINGENCY_TAGS) else float(ppo2_working)
-    return base
+    if any(t in tag for t in _CONTINGENCY_TAGS):
+        return float(ppo2_bottom) + float(ppo2_contingency_tol)
+    return float(ppo2_bottom)
 
 # Per-result warning strings (for expander) and emoji sets (for column headers)
 _col_warnings: list[list[str]] = [[] for _ in results]
