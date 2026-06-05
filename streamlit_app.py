@@ -90,7 +90,7 @@ with st.sidebar:
             "Litres": st.column_config.NumberColumn(min_value=3.0, max_value=30.0,step=0.1, format="%.1f", width="small"),
         },
         hide_index=True,
-        use_container_width=True,
+        width='stretch',
         key="gas_table",
         num_rows="fixed",
     )
@@ -153,8 +153,8 @@ with st.sidebar:
         _bm = calculate_best_mix(depth, target_end=bm_end, max_po2_bottom=bm_po2)
         st.markdown(
             f"**Tx {_bm['o2']}/{_bm['he']}** &nbsp;·&nbsp; "
-            f"ppO₂ {_bm['actual_po2']:.2f} bar &nbsp;·&nbsp; "
-            f"END {_bm['actual_end']:.0f}m"
+            f"ppO₂ {_bm['po2_at_depth']:.2f} bar &nbsp;·&nbsp; "
+            f"END {_bm['end']:.0f}m"
         )
         if st.button("Apply to back gas ↑", key="apply_best_mix"):
             st.session_state["_bm_apply_o2"] = _bm["o2"]
@@ -759,7 +759,7 @@ with st.expander("💰 Fill Cost Calculator", expanded=False):
         cost_rows.append({"Cylinder": cyl_name, "O2%": co2, "He%": che,
                           "Vol (L)": cvol, "Fill (bar)": cpres, "Cost": round(c, 2)})
     cost_df = pd.DataFrame(cost_rows)
-    st.dataframe(cost_df, hide_index=True, use_container_width=True,
+    st.dataframe(cost_df, hide_index=True, width='stretch',
                  column_config={"Cost": st.column_config.NumberColumn(format="%.2f")})
     st.markdown(f"**Total fill cost: {total_cost:.2f}**")
 
