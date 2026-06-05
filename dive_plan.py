@@ -595,27 +595,36 @@ def plot_profiles(results):
     plt.close()
 
 
-def calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4):
+def calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4, o2_narcotic=False):
     """
     Calculate the optimal trimix for a given depth.
 
-    Uses the narcotic-O2 model: END = (depth + 10) × (1 - He_frac) - 10
+    When o2_narcotic=False (default, GUE/IANTD model):
+        END = (depth + 10) × N2_frac - 10  (only N2 is narcotic)
+    When o2_narcotic=True (NOAA/some agency model):
+        END = (depth + 10) × (1 - He_frac) - 10  (O2 + N2 both narcotic)
+
     O2 is set to maximum allowable at depth (capped by max_po2_bottom).
 
     Returns:
-        dict with o2%, he%, n2%, actual END, actual PO2 at depth
+        dict with o2%, he%, n2%, po2_at_depth, end, depth, target_end, max_po2
     """
     ambient_bar = SURFACE_PRESSURE + depth / 10.0
-    ambient_ata = ambient_bar / SURFACE_PRESSURE
 
     # O2%: max allowed by PO2 limit
     o2_frac = max_po2_bottom / ambient_bar
     o2_pct = int(o2_frac * 100)  # round down for safety
     o2_frac = o2_pct / 100.0
 
-    # He% from END formula: END = (depth + 10) × (1 - He_frac) - 10
-    # Solve for He_frac: He_frac = 1 - (END + 10) / (depth + 10)
-    he_frac = 1.0 - (target_end + 10.0) / (depth + 10.0)
+    if o2_narcotic:
+        # O2 counts as narcotic: He_frac = 1 - (END + 10) / (depth + 10)
+        he_frac = 1.0 - (target_end + 10.0) / (depth + 10.0)
+    else:
+        # Only N2 is narcotic: N2_frac = (END + 10) / (depth + 10)
+        # N2_frac = 1 - o2_frac - he_frac  →  he_frac = 1 - o2_frac - N2_target
+        n2_target = (target_end + 10.0) / (depth + 10.0)
+        he_frac = 1.0 - o2_frac - n2_target
+
     he_frac = max(0.0, he_frac)
     he_pct = round(he_frac * 100)
     he_frac = he_pct / 100.0
@@ -623,7 +632,6 @@ def calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4):
     # Verify N2 is non-negative
     n2_frac = 1.0 - o2_frac - he_frac
     if n2_frac < 0:
-        # Too much He + O2; reduce He to fit
         he_frac = 1.0 - o2_frac
         he_pct = int(he_frac * 100)
         he_frac = he_pct / 100.0
@@ -631,9 +639,11 @@ def calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4):
 
     n2_pct = 100 - o2_pct - he_pct
 
-    # Actual values
     actual_po2 = ambient_bar * o2_frac
-    actual_end = (depth + 10) * (1 - he_frac) - 10
+    if o2_narcotic:
+        actual_end = (depth + 10) * (1 - he_frac) - 10
+    else:
+        actual_end = (depth + 10) * n2_frac - 10
 
     return {
         'o2': o2_pct,

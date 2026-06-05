@@ -151,7 +151,7 @@ with st.sidebar:
             "Max ppO₂ at depth (bar)", min_value=1.0, max_value=1.6, value=1.4, step=0.05, format="%.2f",
             help=f"O₂ fraction is set so ppO₂ exactly equals this at {_bm_depth}m (the contingency depth).",
         )
-        _bm = calculate_best_mix(_bm_depth, target_end=bm_end, max_po2_bottom=bm_po2)
+        _bm = calculate_best_mix(_bm_depth, target_end=bm_end, max_po2_bottom=bm_po2, o2_narcotic=bm_o2_narcotic)
         st.markdown(
             f"**Tx {_bm['o2']}/{_bm['he']}** &nbsp;·&nbsp; "
             f"ppO₂ {_bm['po2_at_depth']:.2f} bar at {_bm_depth}m &nbsp;·&nbsp; "
