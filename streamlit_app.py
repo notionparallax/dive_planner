@@ -137,7 +137,8 @@ with st.sidebar:
     sac_deco = int(col2.number_input("SAC deco (L/min)", min_value=10, max_value=30, value=_qpi("sac_dec", 17), step=1))
 
     with st.expander("🧪 Best Mix Calculator", expanded=False):
-        st.caption(f"Calculate optimal trimix for {depth}m")
+        _bm_depth = depth + 3  # deepest contingency
+        st.caption(f"Calculated for {_bm_depth}m (deepest contingency = planned {depth}m + 3m) — safe at worst case")
         bm_end = st.number_input(
             "Target END (m)", min_value=10, max_value=40, value=30, step=1,
             help="Equivalent Narcotic Depth. GUE standard is 30m. Set lower for a more conservative mix.",
@@ -148,12 +149,12 @@ with st.sidebar:
         )
         bm_po2 = st.number_input(
             "Max ppO₂ at depth (bar)", min_value=1.0, max_value=1.6, value=1.4, step=0.05, format="%.2f",
-            help="O₂ fraction is set so ppO₂ exactly equals this at the planned depth.",
+            help=f"O₂ fraction is set so ppO₂ exactly equals this at {_bm_depth}m (the contingency depth).",
         )
-        _bm = calculate_best_mix(depth, target_end=bm_end, max_po2_bottom=bm_po2)
+        _bm = calculate_best_mix(_bm_depth, target_end=bm_end, max_po2_bottom=bm_po2)
         st.markdown(
             f"**Tx {_bm['o2']}/{_bm['he']}** &nbsp;·&nbsp; "
-            f"ppO₂ {_bm['po2_at_depth']:.2f} bar &nbsp;·&nbsp; "
+            f"ppO₂ {_bm['po2_at_depth']:.2f} bar at {_bm_depth}m &nbsp;·&nbsp; "
             f"END {_bm['end']:.0f}m"
         )
         if st.button("Apply to back gas ↑", key="apply_best_mix"):
