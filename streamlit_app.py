@@ -122,7 +122,7 @@ with st.sidebar:
                                         help="Ascent rate from depth to 6m."))
     col1, col2 = st.columns(2)
     _ar_s_default = _qpf("ar_s", 3.0)
-    ascent_rate_shallow = col2.number_input("Ascent shallow (m/min)", min_value=0.5, max_value=10.0,
+    ascent_rate_shallow = col1.number_input("Ascent shallow (m/min)", min_value=0.5, max_value=10.0,
                                             value=_ar_s_default, step=0.5, format="%.1f",
                                             help="Ascent rate from 6m to surface. 3 m/min is a common shallow ascent rate.")
     # Build segmented ascent profile: fast to 6m, slow 6m→surface
@@ -322,8 +322,9 @@ with st.spinner("Computing…"):
 st.title(f"🤿 {depth}m | Tx {o2}/{he} | GF {int(gf_low*100)}/{int(gf_high*100)}")
 st.caption(
     f"Max bottom time: **{T}'** | Descent: {descent_rate} m/min | "
-    f"Ascent: {ascent_rate} m/min (>{'{:.1f}'.format(ascent_rate_shallow)} m/min <6m) | SAC: {sac_bottom}/{sac_deco} L/min"
+    f"Ascent: {ascent_rate} m/min to 6m, {ascent_rate_shallow:.1f} m/min to surface | SAC: {sac_bottom}/{sac_deco} L/min"
     if ascent_rate_shallow != ascent_rate else
+    f"Max bottom time: **{T}'** | Descent: {descent_rate} m/min | "
     f"Ascent: {ascent_rate} m/min | SAC: {sac_bottom}/{sac_deco} L/min"
 )
 
@@ -607,13 +608,26 @@ fig.add_hline(
     annotation_position="top right",
     row=1, col=1,
 )
+# Rich switch line — if at 6m and segmented ascent rate, include rate change label
+_rich_label = f"Rich {rich_o2}/{rich_he} @ {rich_switch}m"
+if ascent_rate_shallow != ascent_rate and rich_switch == 6:
+    _rich_label += f"  |  ↑{ascent_rate_shallow:.1f} m/min  ↓{ascent_rate} m/min"
 fig.add_hline(
     y=rich_switch,
     line=dict(color="#17becf", width=1, dash="dot"),
-    annotation_text=f"Rich {rich_o2}/{rich_he} @ {rich_switch}m",
+    annotation_text=_rich_label,
     annotation_position="top right",
     row=1, col=1,
 )
+# If segmented ascent and O2 switch not at 6m, add a separate rate-change line
+if ascent_rate_shallow != ascent_rate and rich_switch != 6:
+    fig.add_hline(
+        y=6,
+        line=dict(color="#888888", width=1, dash="dot"),
+        annotation_text=f"↑{ascent_rate_shallow:.1f} m/min  |  {ascent_rate} m/min↓",
+        annotation_position="top right",
+        row=1, col=1,
+    )
 
 # ── Gas pressure traces ───────────────────────────────────────────────────────
 GAS_COLORS = {"back": "#4c9be8", "lean": "#56b84b", "rich": "#17becf"}
