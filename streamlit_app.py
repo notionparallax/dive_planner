@@ -142,9 +142,9 @@ with st.sidebar:
         )
         ppo2_contingency_tol = st.number_input(
             "Contingency ppO₂ tolerance (bar)",
-            min_value=0.0, max_value=0.3, value=_qpf("ppo2_ctol", 0.2), step=0.05, format="%.2f",
+            min_value=0.0, max_value=0.3, value=_qpf("ppo2_ctol", 0.02), step=0.01, format="%.2f",
             help=f"Extra headroom added to the bottom limit for contingency scenarios (Deeper / Longer / D&L). "
-                 f"At defaults: contingency limit = {_qpf('ppo2_bot', 1.4):.2f} + {_qpf('ppo2_ctol', 0.2):.2f} = {_qpf('ppo2_bot', 1.4) + _qpf('ppo2_ctol', 0.2):.2f} bar.",
+                 f"At defaults: contingency limit = {_qpf('ppo2_bot', 1.4):.2f} + {_qpf('ppo2_ctol', 0.02):.2f} = {_qpf('ppo2_bot', 1.4) + _qpf('ppo2_ctol', 0.02):.2f} bar.",
         )
         density_limit = st.number_input(
             "Gas density limit (g/L)",
@@ -285,9 +285,9 @@ _CNS_WARN = float(cns_warn)
 _DENSITY_WARN = float(density_limit)
 
 # ppO2 limit: contingency scenarios get the bottom limit + tolerance
-_CONTINGENCY_TAGS = {"Longer", "Deeper", "D & L", "no lean%(D)", "no rich%(D)"}
+_CONTINGENCY_KEYWORDS = ("Longer", "Deeper", "D & L", "(D)")
 def _ppo2_limit_for(tag: str) -> float:
-    if any(t in tag for t in _CONTINGENCY_TAGS):
+    if any(kw in tag for kw in _CONTINGENCY_KEYWORDS):
         return float(ppo2_bottom) + float(ppo2_contingency_tol)
     return float(ppo2_bottom)
 
