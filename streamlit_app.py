@@ -133,6 +133,34 @@ with st.sidebar:
     sac_bottom = int(col1.number_input("SAC bottom (L/min)", min_value=10, max_value=40, value=_qpi("sac_bot", 20), step=1))
     sac_deco = int(col2.number_input("SAC deco (L/min)", min_value=10, max_value=30, value=_qpi("sac_dec", 17), step=1))
 
+    with st.expander("⚙️ Settings", expanded=False):
+        st.caption("Warning thresholds")
+        ppo2_working = st.number_input(
+            "ppO₂ working limit (bar)",
+            min_value=1.0, max_value=1.6, value=_qpf("ppo2_work", 1.4), step=0.05, format="%.2f",
+            help="Back gas ppO₂ above this triggers a warning on the main and planned scenarios. GUE standard: 1.4 bar.",
+        )
+        ppo2_absolute = st.number_input(
+            "ppO₂ absolute limit (bar)",
+            min_value=1.0, max_value=1.6, value=_qpf("ppo2_abs", 1.5), step=0.05, format="%.2f",
+            help="ppO₂ above this always triggers a warning regardless of scenario. Hard ceiling: 1.6 bar.",
+        )
+        ppo2_contingency_tol = st.number_input(
+            "Contingency ppO₂ tolerance (bar)",
+            min_value=0.0, max_value=0.3, value=_qpf("ppo2_ctol", 0.2), step=0.05, format="%.2f",
+            help="Extra tolerance added to the working limit for contingency scenarios (deeper / longer). A +3m contingency naturally pushes ppO₂ ~0.1 bar over the working limit — 0.2 bar gives comfortable headroom.",
+        )
+        density_limit = st.number_input(
+            "Gas density limit (g/L)",
+            min_value=4.0, max_value=10.0, value=_qpf("dens_lim", 6.2), step=0.1, format="%.1f",
+            help="Warn if back gas density exceeds this value. GUE/WKPP limit is 6.2 g/L; above this CNS risk increases.",
+        )
+        cns_warn = st.number_input(
+            "CNS warn threshold (%)",
+            min_value=50, max_value=100, value=_qpi("cns_warn", 80), step=5,
+            help="Warn if CNS oxygen toxicity reaches this percentage in any scenario. Single-dive limit is 80%; NOAA allows 100% for working divers.",
+        )
+
 # Write URL params after sidebar
 st.query_params.update({
     "o2": o2, "he": he, "depth": depth,
@@ -148,6 +176,9 @@ st.query_params.update({
     "sd": s_depth if enable_stop else 5,
     "st": s_time if enable_stop else 1,
     "sac_bot": sac_bottom, "sac_dec": sac_deco,
+    "ppo2_work": ppo2_working, "ppo2_abs": ppo2_absolute,
+    "ppo2_ctol": ppo2_contingency_tol,
+    "dens_lim": density_limit, "cns_warn": cns_warn,
 })
 
 
@@ -248,16 +279,21 @@ st.caption(
 )
 
 # ─── Safety warnings + column header emojis ──────────────────────────────────
-_CNS_WARN = 80.0
-_DENSITY_WARN = 6.2   # g/L — GUE/WKPP limit
-_MAX_PPO2_BOTTOM = 1.5  # warn above this; 1.4 is the guideline but +3m contingency overage is expected
+_CNS_WARN = float(cns_warn)
+_DENSITY_WARN = float(density_limit)
+
+# ppO2 limit: contingency scenarios get extra tolerance on top of the working limit
+_CONTINGENCY_TAGS = {"Longer", "Deeper", "D & L", "no lean%(D)", "no rich%(D)"}
+def _ppo2_limit_for(tag: str) -> float:
+    base = float(ppo2_absolute) if any(t in tag for t in _CONTINGENCY_TAGS) else float(ppo2_working)
+    return base
 
 # Per-result warning strings (for expander) and emoji sets (for column headers)
 _col_warnings: list[list[str]] = [[] for _ in results]
 for i, r in enumerate(results):
     tag = r["tag"].replace("\n", " ")
     if r["cns"] >= _CNS_WARN:
-        _col_warnings[i].append(f"⚠️ **{tag}**: CNS {r['cns']:.0f}% (limit 80%)")
+        _col_warnings[i].append(f"⚠️ **{tag}**: CNS {r['cns']:.0f}% (limit {int(_CNS_WARN)}%)")
     if r["max_gas_density"] >= _DENSITY_WARN:
         _col_warnings[i].append(
             f"⚠️ **{tag}**: gas density {r['max_gas_density']:.2f} g/L "
@@ -266,10 +302,11 @@ for i, r in enumerate(results):
     # Back gas ppO2 at depth
     abs_p = SURFACE_PRESSURE + r["depth"] / 10.0
     ppo2 = (back_gas[0] / 100.0) * abs_p
-    if ppo2 > _MAX_PPO2_BOTTOM:
+    _limit = _ppo2_limit_for(tag)
+    if ppo2 > _limit:
         _col_warnings[i].append(
             f"⚠️ **{tag}**: back gas ppO₂ {ppo2:.2f} bar at {r['depth']}m "
-            f"(limit {_MAX_PPO2_BOTTOM} bar)"
+            f"(limit {_limit:.2f} bar)"
         )
 
 # Constraining scenario: first 8 results match the auto-timer contingency scenarios
