@@ -118,7 +118,18 @@ with st.sidebar:
     st.subheader("Rates")
     col1, col2 = st.columns(2)
     descent_rate = int(col1.number_input("Descent (m/min)", min_value=5, max_value=40, value=_qpi("dr", 20), step=1))
-    ascent_rate = int(col2.number_input("Ascent (m/min)", min_value=3, max_value=20, value=_qpi("ar", 10), step=1))
+    ascent_rate = int(col2.number_input("Ascent deep (m/min)", min_value=3, max_value=20, value=_qpi("ar", 10), step=1,
+                                        help="Ascent rate from depth to 6m."))
+    col1, col2 = st.columns(2)
+    _ar_s_default = _qpf("ar_s", 3.0)
+    ascent_rate_shallow = col2.number_input("Ascent shallow (m/min)", min_value=0.5, max_value=10.0,
+                                            value=_ar_s_default, step=0.5, format="%.1f",
+                                            help="Ascent rate from 6m to surface. 3 m/min is a common shallow ascent rate.")
+    # Build segmented ascent profile: fast to 6m, slow 6m→surface
+    if ascent_rate_shallow != ascent_rate:
+        ascent_rate_profile = [(6, float(ascent_rate)), (0, float(ascent_rate_shallow))]
+    else:
+        ascent_rate_profile = float(ascent_rate)
 
     st.subheader("Descent Stop (S-drill)")
     enable_stop = st.checkbox("Enable S-drill stop", value=_qpb("sdrill", False))
@@ -201,7 +212,7 @@ st.query_params.update({
     "lo2": lean_o2, "lhe": lean_he,
     "ro2": rich_o2, "rhe": rich_he,
     "gfl": int(gf_low * 100), "gfh": int(gf_high * 100),
-    "dr": descent_rate, "ar": ascent_rate,
+    "dr": descent_rate, "ar": ascent_rate, "ar_s": ascent_rate_shallow,
     "sdrill": int(enable_stop),
     "sd": s_depth if enable_stop else 5,
     "st": s_time if enable_stop else 1,
@@ -235,6 +246,8 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
                        lean_gas, lean_switch, rich_gas, rich_switch):
     D = depth
     descent_stops = list(dst) if dst else None
+    # ar may be a float or a tuple of (max_depth, rate) pairs
+    ar_val = list(ar) if isinstance(ar, tuple) and ar and isinstance(ar[0], tuple) else ar
     scenario_defs = [
         (D,     T,      False,    "Main"),
         (D,     T + 3,  False,    "Longer"),
@@ -254,7 +267,7 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
             back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
             back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
             gf_low=gfl, gf_high=gfh,
-            descent_rate=dr, ascent_rate=ar,
+            descent_rate=dr, ascent_rate=ar_val,
             sac_bottom=sb, sac_deco=sd,
             lean_gas=lean_gas, lean_switch=lean_switch,
             rich_gas=rich_gas, rich_switch=rich_switch,
@@ -284,11 +297,14 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
     return results, scenario_defs
 
 
+# Convert profile to tuple for cache hashing
+_ar_cache = tuple(ascent_rate_profile) if isinstance(ascent_rate_profile, list) else ascent_rate_profile
+
 with st.spinner("Computing…"):
     T = (
         _get_max_time(depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
                       back_gas_vol, deco_50_vol, deco_o2_vol,
-                      gf_low, gf_high, descent_rate, ascent_rate, sac_bottom, sac_deco,
+                      gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
                       (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
                       min_gas_reserve)
         if auto_time else manual_bt_val
@@ -297,7 +313,7 @@ with st.spinner("Computing…"):
         back_gas, depth, T,
         back_gas_pressure, deco_50_pressure, deco_o2_pressure,
         back_gas_vol, deco_50_vol, deco_o2_vol,
-        gf_low, gf_high, descent_rate, ascent_rate, sac_bottom, sac_deco,
+        gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
         descent_stops_tuple,
         (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
     )
@@ -306,9 +322,12 @@ with st.spinner("Computing…"):
 st.title(f"🤿 {depth}m | Tx {o2}/{he} | GF {int(gf_low*100)}/{int(gf_high*100)}")
 st.caption(
     f"Max bottom time: **{T}'** | Descent: {descent_rate} m/min | "
+    f"Ascent: {ascent_rate} m/min (>{'{:.1f}'.format(ascent_rate_shallow)} m/min <6m) | SAC: {sac_bottom}/{sac_deco} L/min"
+    if ascent_rate_shallow != ascent_rate else
     f"Ascent: {ascent_rate} m/min | SAC: {sac_bottom}/{sac_deco} L/min"
 )
-
+
+
 # ─── Safety warnings + column header emojis ──────────────────────────────────
 _CNS_WARN = float(cns_warn)
 _DENSITY_WARN = float(density_limit)
@@ -705,7 +724,8 @@ def _build_csv_bytes():
     w.writerow([])
     w.writerow(["ASSUMPTIONS"])
     w.writerow(["SAC", f"{sac_bottom} L/min (bottom)", f"{sac_deco} L/min (deco)"])
-    w.writerow(["Descent", f"{descent_rate} m/min", f"Ascent {ascent_rate} m/min"])
+    ascent_str = f"{ascent_rate} m/min to 6m, {ascent_rate_shallow} m/min to surface" if ascent_rate_shallow != ascent_rate else f"{ascent_rate} m/min"
+    w.writerow(["Descent", f"{descent_rate} m/min", f"Ascent {ascent_str}"])
     if descent_stops_tuple:
         for ds_d, ds_t in descent_stops_tuple:
             w.writerow(["Descent stop", f"{ds_t} min @ {ds_d}m (S-drill)"])
@@ -729,13 +749,13 @@ st.download_button(
 with st.expander("💰 Fill Cost Calculator", expanded=False):
     st.caption("Estimate the cost to fill all cylinders for this dive (ignores any gas already in the tanks)")
     fc1, fc2, fc3, fc4 = st.columns(4)
-    cost_o2   = fc1.number_input("O₂ per litre",      min_value=0.0, value=_qpf("fc_o2",  0.30), step=0.05, format="%.2f",
+    cost_o2   = fc1.number_input("O₂ per litre",      min_value=0.0, value=_qpf("fc_o2",  0.05), step=0.01, format="%.2f",
                                   help="Cost per litre of O₂ gas (pure O₂, used in all cylinders)")
-    cost_he   = fc2.number_input("He per litre",       min_value=0.0, value=_qpf("fc_he",  0.50), step=0.05, format="%.2f",
+    cost_he   = fc2.number_input("He per litre",       min_value=0.0, value=_qpf("fc_he",  0.13), step=0.01, format="%.2f",
                                   help="Cost per litre of helium gas")
-    cost_tmix = fc3.number_input("Trimix blend charge", min_value=0.0, value=_qpf("fc_tmix", 5.0), step=0.5,  format="%.2f",
+    cost_tmix = fc3.number_input("Trimix blend charge", min_value=0.0, value=_qpf("fc_tmix", 40.0), step=0.5,  format="%.2f",
                                   help="Labour/equipment charge to blend a trimix cylinder")
-    cost_nit  = fc4.number_input("Nitrox blend charge", min_value=0.0, value=_qpf("fc_nit",  2.0), step=0.5,  format="%.2f",
+    cost_nit  = fc4.number_input("Nitrox blend charge", min_value=0.0, value=_qpf("fc_nit",  10.0), step=0.5,  format="%.2f",
                                   help="Labour/equipment charge to blend a nitrox (EAN) cylinder")
 
     def _fill_cost(o2_pct, he_pct, volume_l, pressure_bar, cost_o2, cost_he, cost_tmix, cost_nit):
