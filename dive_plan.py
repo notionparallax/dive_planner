@@ -113,28 +113,45 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
 
     if deco_cylinders_config is not None:
         _deco_gases_raw = deco_cylinders_config
+        deco_gas_objs = []
+        deco_cyl_objs = []
+        for idx, (o2, he, sd) in enumerate(_deco_gases_raw):
+            if float(sd) >= depth:
+                continue  # skip gas whose switch depth is at or beyond dive depth
+            if idx == 0:
+                label = 'lean'
+                vol = _deco_50_vol
+                pressure = _deco_50_pressure
+            else:
+                label = 'rich'
+                vol = _deco_o2_vol
+                pressure = _deco_o2_pressure
+            deco_gas_objs.append(_Gas(o2=o2, he=he, switch_depth=float(sd), label=label))
+            deco_cyl_objs.append(_Cylinder(volume_litres=vol, fill_bar=pressure))
     else:
-        _deco_gases_raw = []
+        # Build tagged list so each gas always carries its correct role/label,
+        # regardless of which gas is lost (avoids idx-based mislabelling).
+        _deco_gases_tagged = []
         if deco_gases_lost not in (True, 'lean'):
-            _deco_gases_raw.append((*_lean_gas, _lean_switch))
+            _deco_gases_tagged.append(('lean', *_lean_gas, _lean_switch))
         if deco_gases_lost not in (True, 'rich'):
-            _deco_gases_raw.append((*_rich_gas, _rich_switch))
+            _deco_gases_tagged.append(('rich', *_rich_gas, _rich_switch))
 
-    deco_gas_objs = []
-    deco_cyl_objs = []
-    for idx, (o2, he, sd) in enumerate(_deco_gases_raw):
-        if float(sd) >= depth:
-            continue  # skip gas whose switch depth is at or beyond dive depth
-        if idx == 0:  # lean gas
-            label = 'lean'
-            vol = _deco_50_vol
-            pressure = _deco_50_pressure
-        else:  # rich gas
-            label = 'rich'
-            vol = _deco_o2_vol
-            pressure = _deco_o2_pressure
-        deco_gas_objs.append(_Gas(o2=o2, he=he, switch_depth=float(sd), label=label))
-        deco_cyl_objs.append(_Cylinder(volume_litres=vol, fill_bar=pressure))
+        deco_gas_objs = []
+        deco_cyl_objs = []
+        for (role, o2, he, sd) in _deco_gases_tagged:
+            if float(sd) >= depth:
+                continue  # skip gas whose switch depth is at or beyond dive depth
+            if role == 'lean':
+                label = 'lean'
+                vol = _deco_50_vol
+                pressure = _deco_50_pressure
+            else:
+                label = 'rich'
+                vol = _deco_o2_vol
+                pressure = _deco_o2_pressure
+            deco_gas_objs.append(_Gas(o2=o2, he=he, switch_depth=float(sd), label=label))
+            deco_cyl_objs.append(_Cylinder(volume_litres=vol, fill_bar=pressure))
 
     return _plan_dive(
         depth=depth,
