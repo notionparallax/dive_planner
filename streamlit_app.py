@@ -1,5 +1,6 @@
 """Dive planner web interface."""
 import io
+import importlib.metadata
 import csv as _csv
 import os
 import sys
@@ -245,8 +246,14 @@ with st.sidebar:
             help="No cylinder may go below this pressure in any scenario, including the worst-case contingency. 10 bar is a practical floor — it's not usable gas but confirms the cylinder isn't empty.",
         )
 
-# Write URL params after sidebar
-st.query_params.update({
+# Write URL params — only update keys whose values have changed to avoid render-loop race conditions
+def _qp_set(updates: dict):
+    """Write only changed query params to prevent re-render races on fast typing."""
+    changed = {k: str(v) for k, v in updates.items() if str(st.query_params.get(k, "")) != str(v)}
+    if changed:
+        st.query_params.update(changed)
+
+_qp_set({
     "o2": o2, "he": he, "depth": depth,
     "h2_bg": h2,
     "auto_time": int(auto_time), "manual_bt": manual_bt_val or 31,
@@ -264,9 +271,9 @@ st.query_params.update({
     "ppo2_bot": ppo2_bottom, "ppo2_ctol": ppo2_contingency_tol,
     "dens_lim": density_limit, "cns_warn": cns_warn, "min_res": min_gas_reserve,
 })
-if _h2_mode:
-    st.query_params.update({"tv_o2": travel_o2, "tv_he": travel_he, "h2_sd": h2_switch,
-                            "tv_bar": travel_bar, "tv_vol": travel_vol})
+if _travel_mode:
+    _qp_set({"tv_o2": travel_o2, "tv_he": travel_he, "h2_sd": h2_switch,
+             "tv_bar": travel_bar, "tv_vol": travel_vol})
 
 
 # ─── Compute ──────────────────────────────────────────────────────────────────
@@ -888,8 +895,7 @@ with st.expander("💰 Fill Cost Calculator", expanded=False):
                  column_config={"Cost": st.column_config.NumberColumn(format="%.2f")})
     st.markdown(f"**Total fill cost: {total_cost:.2f}**")
 
-    st.query_params.update({"fc_o2": cost_o2, "fc_he": cost_he,
-                             "fc_tmix": cost_tmix, "fc_nit": cost_nit})
+    _qp_set({"fc_o2": cost_o2, "fc_he": cost_he, "fc_tmix": cost_tmix, "fc_nit": cost_nit})
 
 # ─── Documentation ────────────────────────────────────────────────────────────
 with st.expander("📖 How to use this planner", expanded=False):
@@ -958,3 +964,11 @@ the same inputs. ([known issue #45](https://github.com/notionparallax/decodaiten
 
 This tool is for planning and comparison only.
 """)
+
+
+# Version
+try:
+    _decotengu_version = importlib.metadata.version("decodaitengu")
+except Exception:
+    _decotengu_version = "unknown"
+st.caption(f"decodaitengu v{_decotengu_version}")
