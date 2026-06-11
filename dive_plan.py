@@ -108,7 +108,8 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
     _rich_gas = rich_gas if rich_gas is not None else (100, 0)
     _rich_switch = rich_switch if rich_switch is not None else _DECO_O2_SWITCH_DEPTH
 
-    back_gas_obj = _Gas(o2=_back_gas[0], he=_back_gas[1], label='back')
+    _h2 = int(_back_gas[2]) if len(_back_gas) > 2 else 0
+    back_gas_obj = _Gas(o2=_back_gas[0], he=_back_gas[1], h2=_h2, label='back')
     back_cyl_obj = _Cylinder(volume_litres=_back_gas_vol, fill_bar=_back_gas_pressure)
 
     if deco_cylinders_config is not None:
@@ -674,14 +675,51 @@ def calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4, o2_narcotic=Fal
     }
 
 
-def _gas_density_gl(o2_pct, he_pct, depth_m):
+def _gas_density_gl(o2_pct, he_pct, depth_m, h2_pct=0):
     """Gas density [g/L] at depth using ideal gas law at 37°C body temperature."""
-    MW_O2, MW_N2, MW_HE = 31.998, 28.014, 4.003
+    MW_O2, MW_N2, MW_HE, MW_H2 = 31.998, 28.014, 4.003, 2.016
     R, T = 0.083145, 310.15
     f_o2, f_he = o2_pct / 100.0, he_pct / 100.0
-    mw_mix = f_o2 * MW_O2 + (1.0 - f_o2 - f_he) * MW_N2 + f_he * MW_HE
+    f_h2 = h2_pct / 100.0
+    mw_mix = f_o2 * MW_O2 + (1.0 - f_o2 - f_he - f_h2) * MW_N2 + f_he * MW_HE + f_h2 * MW_H2
     abs_p = SURFACE_PRESSURE + depth_m / 10.0
     return (mw_mix * abs_p) / (R * T)
+
+
+def calc_travel_gas_min(sac_bottom, h2_switch_depth, lean_switch_depth,
+                        descent_rate, ascent_rate, travel_vol, travel_bar,
+                        surface_pressure=1.01325):
+    """Calculate travel gas consumption and minimum requirement for H2 diving.
+
+    Returns dict with:
+    - descent_litres: gas consumed descending to h2_switch_depth
+    - descent_remaining_bar: travel gas remaining after descent (per diver)
+    - min_required_bar: minimum travel gas needed (descent + emergency ascent to lean gas × 2 divers)
+    - has_enough: True if travel_bar >= min_required_bar
+    """
+    # Descent 0m → h2_switch_depth
+    p_start = surface_pressure
+    p_switch = surface_pressure + h2_switch_depth * 0.09985
+    avg_p_descent = (p_start + p_switch) / 2.0
+    descent_time = h2_switch_depth / descent_rate
+    descent_litres = sac_bottom * descent_time * avg_p_descent
+
+    # Emergency ascent h2_switch_depth → lean_switch_depth (×2 divers)
+    p_lean = surface_pressure + lean_switch_depth * 0.09985
+    avg_p_ascent = (p_switch + p_lean) / 2.0
+    ascent_time = (h2_switch_depth - lean_switch_depth) / ascent_rate
+    ascent_litres_per_diver = sac_bottom * ascent_time * avg_p_ascent
+
+    min_litres = descent_litres + ascent_litres_per_diver * 2
+    min_bar = min_litres / travel_vol
+    descent_bar_used = descent_litres / travel_vol
+
+    return {
+        'descent_litres': descent_litres,
+        'descent_remaining_bar': travel_bar - descent_bar_used,
+        'min_required_bar': min_bar,
+        'has_enough': travel_bar >= min_bar,
+    }
 
 
 def calculate_deco_switch_depth(o2_pct, max_po2_deco=1.6):

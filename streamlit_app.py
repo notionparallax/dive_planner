@@ -29,6 +29,7 @@ from dive_plan import (  # noqa: E402
     SURFACE_PRESSURE,
     WATER_TEMP_C,
     _gas_density_gl,
+    calc_travel_gas_min,
     calculate_best_mix,
     find_max_bottom_time,
     run_scenario,
@@ -73,42 +74,76 @@ with st.sidebar:
     st.subheader("Gases & Cylinders")
     _bm_o2 = st.session_state.pop("_bm_apply_o2", None)
     _bm_he = st.session_state.pop("_bm_apply_he", None)
-    _gas_defaults = pd.DataFrame({
-        "Gas":     ["Back",  "Lean",  "Rich"],
-        "O2%":     [_bm_o2 if _bm_o2 is not None else _qpi("o2",  21),  _qpi("lo2", 50),  _qpi("ro2", 100)],
-        "He%":     [_bm_he if _bm_he is not None else _qpi("he",   0),  _qpi("lhe",  0),  _qpi("rhe",   0)],
-        "Bar":     [_qpi("bgp", 230), _qpi("lp",  200), _qpi("rp",  200)],
-        "Litres":  [_qpf("bgv", 24.4),_qpf("lv",  11.1),_qpf("rv",  11.1)],
-    })
+    _h2_mode     = st.session_state.get("_h2_mode", False)
+    _travel_mode = st.session_state.get("_travel_mode", False)
+
+    # Travel row prepended when back gas is hypoxic (O2% < 18)
+    _bi = 1 if _travel_mode else 0   # back-gas row index
+    _labels = (["Travel"] if _travel_mode else []) + ["Back", "Lean", "Rich"]
+    _tv   = [_qpi("tv_o2",  21)]  if _travel_mode else []
+    _th   = [_qpi("tv_he",   0)]  if _travel_mode else []
+    _tb   = [_qpi("tv_bar", 230)] if _travel_mode else []
+    _tvol = [_qpf("tv_vol", 24.4)] if _travel_mode else []
+    _gas_defaults_data = {
+        "Gas":  _labels,
+        "O2%":  _tv   + [_bm_o2 if _bm_o2 is not None else _qpi("o2", 21), _qpi("lo2", 50), _qpi("ro2", 100)],
+        "He%":  _th   + [_bm_he if _bm_he is not None else _qpi("he",  0), _qpi("lhe",  0), _qpi("rhe",   0)],
+    }
+    if _h2_mode:
+        _gas_defaults_data["H2%"] = ([0] if _travel_mode else []) + [_qpi("h2_bg", 0), 0, 0]
+    _gas_defaults_data["Bar"]    = _tb   + [_qpi("bgp", 230), _qpi("lp",  200), _qpi("rp",  200)]
+    _gas_defaults_data["Litres"] = _tvol + [_qpf("bgv", 24.4), _qpf("lv", 11.1), _qpf("rv", 11.1)]
+
+    _col_config_gas = {
+        "Gas":    st.column_config.TextColumn(disabled=True, width="small"),
+        "O2%":    st.column_config.NumberColumn(min_value=1, max_value=100, step=1, format="%d", width="small",
+                                                help="Back gas O2% < 18% adds a Travel row. ≤ 4% enables 🧪 H₂ mode."),
+        "He%":    st.column_config.NumberColumn(min_value=0,   max_value=90,  step=1,   format="%d", width="small"),
+        "Bar":    st.column_config.NumberColumn(min_value=50,  max_value=300, step=5,   format="%d", width="small"),
+        "Litres": st.column_config.NumberColumn(min_value=3.0, max_value=30.0, step=0.1, format="%.1f", width="small"),
+    }
+    if _h2_mode:
+        _col_config_gas["H2%"] = st.column_config.NumberColumn(min_value=0, max_value=95, step=1, format="%d", width="small")
     _gas_table = st.data_editor(
-        _gas_defaults,
-        column_config={
-            "Gas":    st.column_config.TextColumn(disabled=True, width="small"),
-            "O2%":    st.column_config.NumberColumn(min_value=4,   max_value=100, step=1,   format="%d", width="small"),
-            "He%":    st.column_config.NumberColumn(min_value=0,   max_value=90,  step=1,   format="%d", width="small"),
-            "Bar":    st.column_config.NumberColumn(min_value=50,  max_value=300, step=5,   format="%d", width="small"),
-            "Litres": st.column_config.NumberColumn(min_value=3.0, max_value=30.0,step=0.1, format="%.1f", width="small"),
-        },
+        pd.DataFrame(_gas_defaults_data),
+        column_config=_col_config_gas,
         hide_index=True,
         width='stretch',
         key="gas_table",
         num_rows="fixed",
     )
-    o2           = int(_gas_table.iloc[0]["O2%"])
-    he           = int(_gas_table.iloc[0]["He%"])
-    back_gas_pressure = int(_gas_table.iloc[0]["Bar"])
-    back_gas_vol = float(_gas_table.iloc[0]["Litres"])
-    lean_o2      = int(_gas_table.iloc[1]["O2%"])
-    lean_he      = int(_gas_table.iloc[1]["He%"])
+    o2  = int(_gas_table.iloc[_bi]["O2%"])
+    he  = int(_gas_table.iloc[_bi]["He%"])
+    h2  = int(_gas_table.iloc[_bi]["H2%"]) if (_h2_mode and "H2%" in _gas_table.columns) else 0
+    st.session_state["_h2_mode"]     = (o2 <= 4)
+    st.session_state["_travel_mode"] = (o2 < 18)
+    back_gas_pressure = int(_gas_table.iloc[_bi]["Bar"])
+    back_gas_vol      = float(_gas_table.iloc[_bi]["Litres"])
+    lean_o2      = int(_gas_table.iloc[_bi + 1]["O2%"])
+    lean_he      = int(_gas_table.iloc[_bi + 1]["He%"])
     lean_switch  = int(calc_switch_depth(lean_o2 / 100.0))
-    deco_50_pressure = int(_gas_table.iloc[1]["Bar"])
-    deco_50_vol  = float(_gas_table.iloc[1]["Litres"])
-    rich_o2      = int(_gas_table.iloc[2]["O2%"])
-    rich_he      = int(_gas_table.iloc[2]["He%"])
+    deco_50_pressure = int(_gas_table.iloc[_bi + 1]["Bar"])
+    deco_50_vol  = float(_gas_table.iloc[_bi + 1]["Litres"])
+    rich_o2      = int(_gas_table.iloc[_bi + 2]["O2%"])
+    rich_he      = int(_gas_table.iloc[_bi + 2]["He%"])
     rich_switch  = int(calc_switch_depth(rich_o2 / 100.0))
-    deco_o2_pressure = int(_gas_table.iloc[2]["Bar"])
-    deco_o2_vol  = float(_gas_table.iloc[2]["Litres"])
-    back_gas = (o2, he)
+    deco_o2_pressure = int(_gas_table.iloc[_bi + 2]["Bar"])
+    deco_o2_vol  = float(_gas_table.iloc[_bi + 2]["Litres"])
+    back_gas = (o2, he, h2)
+
+    if _travel_mode:
+        travel_o2  = int(_gas_table.iloc[0]["O2%"])
+        travel_he  = int(_gas_table.iloc[0]["He%"])
+        travel_bar = int(_gas_table.iloc[0]["Bar"])
+        travel_vol = float(_gas_table.iloc[0]["Litres"])
+        _sw_label = "Switch to H2 gas at (m)" if _h2_mode else "Switch to back gas at (m)"
+        _sw_help  = ("Depth where you switch from travel gas to H2 back gas (~40 m typical)."
+                     if _h2_mode else "Depth where you switch from travel gas to back gas.")
+        h2_switch = int(st.number_input(_sw_label, min_value=0, max_value=60,
+                                        value=_qpi("h2_sd", 40), step=5, help=_sw_help, key="h2_sd_inp"))
+    else:
+        travel_o2, travel_he, h2_switch = 21, 0, 40
+        travel_bar, travel_vol = 230, 24.4
 
     st.subheader("Deco Model")
     col1, col2 = st.columns(2)
@@ -205,6 +240,7 @@ with st.sidebar:
 # Write URL params after sidebar
 st.query_params.update({
     "o2": o2, "he": he, "depth": depth,
+    "h2_bg": h2,
     "auto_time": int(auto_time), "manual_bt": manual_bt_val or 31,
     "bgp": back_gas_pressure, "bgv": back_gas_vol,
     "lp": deco_50_pressure, "lv": deco_50_vol,
@@ -220,6 +256,9 @@ st.query_params.update({
     "ppo2_bot": ppo2_bottom, "ppo2_ctol": ppo2_contingency_tol,
     "dens_lim": density_limit, "cns_warn": cns_warn, "min_res": min_gas_reserve,
 })
+if _h2_mode:
+    st.query_params.update({"tv_o2": travel_o2, "tv_he": travel_he, "h2_sd": h2_switch,
+                            "tv_bar": travel_bar, "tv_vol": travel_vol})
 
 
 # ─── Compute ──────────────────────────────────────────────────────────────────
@@ -318,8 +357,23 @@ with st.spinner("Computing…"):
         (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
     )
 
+if _h2_mode:
+    st.warning(
+        "🧪 **EXPERIMENTAL**: H2 (hydrogen) diving calculations use unvalidated coefficients "
+        "derived from diffusion-theory scaling of He half-times. "
+        "These results must **NOT** be used for actual dive planning.",
+    )
+
 # ─── Header ───────────────────────────────────────────────────────────────────
-st.title(f"🤿 {depth}m | Tx {o2}/{he} | GF {int(gf_low*100)}/{int(gf_high*100)}")
+if _h2_mode and h2 > 0:
+    _gas_str = f"Hydreliox {o2}/{he}/{h2}"
+elif he > 0:
+    _gas_str = f"Tx {o2}/{he}"
+elif o2 == 21:
+    _gas_str = "Air"
+else:
+    _gas_str = f"EAN{o2}"
+st.title(f"🤿 {depth}m | {_gas_str} | GF {int(gf_low*100)}/{int(gf_high*100)}")
 st.caption(
     f"Max bottom time: **{T}'** | Descent: {descent_rate} m/min | "
     f"Ascent: {ascent_rate} m/min to 6m, {ascent_rate_shallow:.1f} m/min to surface | SAC: {sac_bottom}/{sac_deco} L/min"
@@ -434,9 +488,10 @@ table_rows["OTU"] = [f"{r['otu']:.0f}" for r in results]
 table_rows["CNS %"] = [f"{r['cns']:.0f}%" for r in results]
 table_rows["END"] = [f"{(r['depth']+10)*(1-back_gas[1]/100)-10:.0f}m" for r in results]
 table_rows["PO2"] = [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f}" for r in results]
-table_rows["Gas density"] = [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth']):.2f} g/L" for r in results]
+table_rows["Gas density"] = [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth'], h2_pct=h2):.2f} g/L" for r in results]
 table_rows["   "] = [""] * len(results)
-table_rows["Back gas left"] = [f"{r['back_remaining_bar']:.0f} bar" for r in results]
+_back_label = "H2 gas left" if (_h2_mode and h2 > 0) else "Back gas left"
+table_rows[_back_label] = [f"{r['back_remaining_bar']:.0f} bar" for r in results]
 table_rows[f"Lean ({lean_o2}/{lean_he})"] = [
     "--" if r["deco_gases_lost"] in (True, "lean") else f"{r['lean_remaining_bar']:.0f} bar"
     for r in results
@@ -445,6 +500,18 @@ table_rows[f"Rich ({rich_o2}/{rich_he})"] = [
     "--" if r["deco_gases_lost"] in (True, "rich") else f"{r['rich_remaining_bar']:.0f} bar"
     for r in results
 ]
+if _h2_mode:
+    _tg = calc_travel_gas_min(
+        sac_bottom=sac_bottom,
+        h2_switch_depth=h2_switch,
+        lean_switch_depth=lean_switch,
+        descent_rate=descent_rate,
+        ascent_rate=float(ascent_rate),
+        travel_vol=travel_vol,
+        travel_bar=travel_bar,
+    )
+    table_rows["Travel gas left"] = [f"{_tg['descent_remaining_bar']:.0f} bar"] * len(results)
+    table_rows["Travel min req."] = [f"{_tg['min_required_bar']:.0f} bar req."] * len(results)
 
 df = pd.DataFrame(table_rows, index=col_labels).T
 df = df.reset_index()
