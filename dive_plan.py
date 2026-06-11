@@ -917,7 +917,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         ascent_rate=None, sac_bottom=None, sac_deco=None,
                         lean_gas=None, lean_switch=None,
                         rich_gas=None, rich_switch=None,
-                        min_reserve=10):
+                        min_reserve=10,
+                        descent_stops=None):
     """
     Find the maximum bottom time satisfying the gas rule.
 
@@ -981,7 +982,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                      rich_gas=_rich_gas, rich_switch=_rich_switch,
                                      gf_low=_gf_low, gf_high=_gf_high,
                                      descent_rate=_descent_rate, ascent_rate=_ascent_rate,
-                                     sac_bottom=_sac_bottom, sac_deco=_sac_deco)
+                                     sac_bottom=_sac_bottom, sac_deco=_sac_deco,
+                                     descent_stops=descent_stops)
                     if r['back_remaining_bar'] < min_reserve:
                         ok = False
                         break
@@ -1004,7 +1006,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                  rich_gas=_rich_gas, rich_switch=_rich_switch,
                                  gf_low=_gf_low, gf_high=_gf_high,
                                  descent_rate=_descent_rate, ascent_rate=_ascent_rate,
-                                 sac_bottom=_sac_bottom, sac_deco=_sac_deco)
+                                 sac_bottom=_sac_bottom, sac_deco=_sac_deco,
+                                 descent_stops=descent_stops)
                 ok = r['min_gas']['bar_at_turn'] >= thirds_pressure
             if ok:
                 best = mid
@@ -1066,7 +1069,8 @@ def generate_planning_table(depth, back_gas=None, bottom_time=None,
                                  deco_o2_pressure=_deco_o2_pressure,
                                  gf_low=_gf_low, gf_high=_gf_high,
                                  descent_rate=_descent_rate, ascent_rate=_ascent_rate,
-                                 sac_bottom=_sac_bottom, sac_deco=_sac_deco)
+                                 sac_bottom=_sac_bottom, sac_deco=_sac_deco,
+                                 descent_stops=descent_stops)
     else:
         T = bottom_time
     D = depth

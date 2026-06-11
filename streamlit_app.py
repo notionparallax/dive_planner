@@ -279,7 +279,8 @@ if _travel_mode:
 # ─── Compute ──────────────────────────────────────────────────────────────────
 @st.cache_data
 def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd,
-                  lean_gas, lean_switch, rich_gas, rich_switch, min_reserve=10):
+                  lean_gas, lean_switch, rich_gas, rich_switch, min_reserve=10,
+                  descent_stops=None):
     return find_max_bottom_time(
         depth, back_gas,
         back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
@@ -289,6 +290,7 @@ def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, d
         lean_gas=lean_gas, lean_switch=lean_switch,
         rich_gas=rich_gas, rich_switch=rich_switch,
         min_reserve=min_reserve,
+        descent_stops=descent_stops,
     )
 
 
@@ -363,7 +365,8 @@ with st.spinner("Computing…"):
                       back_gas_vol, deco_50_vol, deco_o2_vol,
                       gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
                       (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
-                      min_gas_reserve)
+                      min_gas_reserve,
+                      descent_stops=descent_stops_tuple)
         if auto_time else manual_bt_val
     )
     results, scenario_defs = _compute_scenarios(
