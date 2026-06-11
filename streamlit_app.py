@@ -198,7 +198,7 @@ with st.sidebar:
         )
         min_gas_reserve = st.number_input(
             "Minimum gas reserve (bar)",
-            min_value=0, max_value=50, value=_qpi("min_res", 10), step=5,
+            min_value=0, max_value=50, value=_qpi("min_res", 10), step=1,
             help="No cylinder may go below this pressure in any scenario, including the worst-case contingency. 10 bar is a practical floor — it's not usable gas but confirms the cylinder isn't empty.",
         )
 
