@@ -800,3 +800,65 @@ with st.expander("💰 Fill Cost Calculator", expanded=False):
 
     st.query_params.update({"fc_o2": cost_o2, "fc_he": cost_he,
                              "fc_tmix": cost_tmix, "fc_nit": cost_nit})
+
+# ─── Documentation ────────────────────────────────────────────────────────────
+with st.expander("📖 How to use this planner", expanded=False):
+    st.markdown("""
+### Quick start
+
+Set depth, gas mix, and GF in the sidebar. With **Auto bottom time** enabled, the planner
+finds the maximum bottom time where all contingency scenarios still have gas remaining.
+To share a plan, copy the URL — all inputs are encoded in the query string.
+
+---
+
+### Reading the table
+
+Each column is a scenario. Red and amber cells flag warnings: ppO₂ limit exceeded, CNS ≥ 80%,
+or gas density above the configured limit.
+
+The **Back gas left**, **Lean**, and **Rich** rows show pressure *remaining* after the dive, not
+consumed. `--` means that gas was not carried in that scenario (lost gas contingency).
+The Bounce column has no leave time shown, as it is not a planned dive.
+
+---
+
+### Reading the profile chart
+
+Select a scenario with the radio buttons above the chart to show its ceiling band and gas
+pressure trace. The dashed line and shaded band show your ceiling relative to your actual
+depth — any overlap means you are inside your ceiling.
+
+The emergency (GF 99/99) line shows the absolute minimum ascent obligation with no
+conservatism applied.
+
+---
+
+### Gas planning
+
+Turn pressure and min gas assume two divers ascending on back gas from depth, with one
+minute of problem-solving time at the bottom. "Min gas" is the rock-bottom threshold;
+turn pressure is when to head back on a planned penetration dive.
+
+The rule-of-thirds line on the gas chart is a separate reference and does not account for
+deco gas use.
+
+---
+
+### Gradient factors
+
+GF Low controls first stop depth; GF High controls conservatism at the surface.
+The planner uses Bühlmann ZHL-16C via [decodaitengu](https://github.com/notionparallax/decodaitengu).
+
+---
+
+### Caveats
+
+Cross-check plans against Subsurface or your dive computer before use.
+
+Gas switching currently occurs only at deco stops, not during the free ascent from depth to
+first stop. Plans with deco gases are therefore slightly more conservative than Subsurface for
+the same inputs. ([known issue #45](https://github.com/notionparallax/decodaitengu/issues/45))
+
+This tool is for planning and comparison only.
+""")
