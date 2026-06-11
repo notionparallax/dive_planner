@@ -389,6 +389,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             (c['remaining_bar'] for c in cylinders_result if c['gas']['o2'] == _rich_gas[0]), None)
         gas_used = {c['name']: {'litres': c['used_litres'], 'bar': c['used_bar']}
                     for c in cylinders_result}
+        travel_remaining = None  # cfg path doesn't support travel gas
     else:
         # Non-cfg path: use run_profile with lean/rich gas params
         summary = run_profile(
@@ -437,7 +438,8 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         has_switch_stop = deco_gases_lost not in (True, 'lean')
         switch_depth = _lean_switch
         cylinders_result = None
-        travel_remaining = None
+        if travel_remaining is None:
+            pass  # already None
 
     # Build deco_stops and apply switch stop
     deco_stops = [(s.depth, s.time) for s in summary.stops]

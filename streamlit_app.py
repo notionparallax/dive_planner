@@ -177,6 +177,14 @@ with st.sidebar:
         s_time = int(col2.number_input("Duration (min)", min_value=1, max_value=30, value=s_time, step=1))
         descent_stops_tuple = ((s_depth, s_time),)
 
+    # In travel mode, add a 1-min descent stop at h2_switch for the gas switch
+    if _travel_mode:
+        tv_stop = (h2_switch, 1)
+        if descent_stops_tuple:
+            descent_stops_tuple = descent_stops_tuple + (tv_stop,)
+        else:
+            descent_stops_tuple = (tv_stop,)
+
     st.subheader("Gas Consumption")
     col1, col2 = st.columns(2)
     sac_bottom = int(col1.number_input("SAC bottom (L/min)", min_value=10, max_value=40, value=_qpi("sac_bot", 20), step=1))
