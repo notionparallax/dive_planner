@@ -852,6 +852,12 @@ The planner uses Bühlmann ZHL-16C via [decodaitengu](https://github.com/notionp
 
 ---
 
+### Why scenarios and how does auto bottom time work?
+
+Dive planning is easy if you just look at the ideal profile, but if things change, and you're left with your runtimes, then you need some contingency planning. The process of doing those plans is long and often recursive, as a later contingency invalidates the main plan. This planner works out the longest bottom time where all the contingency plans still have gas left, so you can be confident (but do check this against another dive planner) that if something goes wrong, you can still get back safely.
+                
+The auto bottom time is found by running the main scenario with a long bottom time, then checking the gas left in each contingency scenario. If any scenario runs out of gas, the bottom time is reduced and the scenarios are re-run until all scenarios have gas left at the end. The constraining scenario (the one that runs out of gas first) is flagged in the table with a 🖐️ emoji.
+
 ### Caveats
 
 Cross-check plans against Subsurface or your dive computer before use.
