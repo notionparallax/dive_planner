@@ -282,7 +282,7 @@ _EMERGENCY_ASCENT_RATE = 18  # m/min — fast but survivable
 
 @st.cache_data
 def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd, dst,
-                       lean_gas, lean_switch, rich_gas, rich_switch):
+                       lean_gas, lean_switch, rich_gas, rich_switch, travel_gas_config=None):
     D = depth
     descent_stops = list(dst) if dst else None
     # ar may be a float or a tuple of (max_depth, rate) pairs
@@ -311,6 +311,7 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
             lean_gas=lean_gas, lean_switch=lean_switch,
             rich_gas=rich_gas, rich_switch=rich_switch,
             descent_stops=descent_stops,
+            travel_gas_config=travel_gas_config,
         )
         r["leave_time"] = bt
         r["tag"] = tag
@@ -328,6 +329,7 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
         lean_gas=lean_gas, lean_switch=lean_switch,
         rich_gas=rich_gas, rich_switch=rich_switch,
         descent_stops=descent_stops,
+        travel_gas_config=travel_gas_config,
     )
     emerg["leave_time"] = T
     emerg["tag"] = "Emergency\n(GF99/99)"
@@ -340,6 +342,7 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
 _ar_cache = tuple(ascent_rate_profile) if isinstance(ascent_rate_profile, list) else ascent_rate_profile
 
 with st.spinner("Computing…"):
+    _tv_config = (travel_o2, travel_he, travel_bar, travel_vol, h2_switch) if _travel_mode else None
     T = (
         _get_max_time(depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
                       back_gas_vol, deco_50_vol, deco_o2_vol,
@@ -355,6 +358,7 @@ with st.spinner("Computing…"):
         gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
         descent_stops_tuple,
         (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
+        travel_gas_config=_tv_config,
     )
 
 if _h2_mode:
@@ -500,7 +504,11 @@ table_rows[f"Rich ({rich_o2}/{rich_he})"] = [
     "--" if r["deco_gases_lost"] in (True, "rich") else f"{r['rich_remaining_bar']:.0f} bar"
     for r in results
 ]
-if _h2_mode:
+if _travel_mode:
+    table_rows[f"Travel ({travel_o2}/{travel_he})"] = [
+        f"{r['travel_remaining_bar']:.0f} bar" if r.get('travel_remaining_bar') is not None else "--"
+        for r in results
+    ]
     _tg = calc_travel_gas_min(
         sac_bottom=sac_bottom,
         h2_switch_depth=h2_switch,
@@ -510,7 +518,6 @@ if _h2_mode:
         travel_vol=travel_vol,
         travel_bar=travel_bar,
     )
-    table_rows["Travel gas left"] = [f"{_tg['descent_remaining_bar']:.0f} bar"] * len(results)
     table_rows["Travel min req."] = [f"{_tg['min_required_bar']:.0f} bar req."] * len(results)
 
 df = pd.DataFrame(table_rows, index=col_labels).T
@@ -675,6 +682,14 @@ fig.add_hline(
     annotation_position="top right",
     row=1, col=1,
 )
+if _travel_mode:
+    fig.add_hline(
+        y=h2_switch,
+        line=dict(color="#ff8c00", width=1, dash="dot"),
+        annotation_text=f"Travel → back gas @ {h2_switch}m",
+        annotation_position="top right",
+        row=1, col=1,
+    )
 # Rich switch line — if at 6m and segmented ascent rate, include rate change label
 _rich_label = f"Rich {rich_o2}/{rich_he} @ {rich_switch}m"
 if ascent_rate_shallow != ascent_rate and rich_switch == 6:
@@ -697,8 +712,8 @@ if ascent_rate_shallow != ascent_rate and rich_switch != 6:
     )
 
 # ── Gas pressure traces ───────────────────────────────────────────────────────
-GAS_COLORS = {"back": "#4c9be8", "lean": "#56b84b", "rich": "#17becf"}
-GAS_LABELS = {"back": "Back gas", "lean": f"Lean ({lean_o2}/{lean_he})", "rich": f"Rich ({rich_o2}/{rich_he})"}
+GAS_COLORS = {"back": "#4c9be8", "lean": "#56b84b", "rich": "#17becf", "travel": "#ff8c00"}
+GAS_LABELS = {"back": "Back gas", "lean": f"Lean ({lean_o2}/{lean_he})", "rich": f"Rich ({rich_o2}/{rich_he})", "travel": f"Travel ({travel_o2}/{travel_he})"}
 
 gpp = sel.get("gas_pressure_profile", {})
 for gas_key, color in GAS_COLORS.items():

@@ -81,7 +81,8 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
                back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
                lean_gas=None, lean_switch=None,
                rich_gas=None, rich_switch=None,
-               descent_stops=None):
+               descent_stops=None,
+               travel_gas_config=None):
     """Run a decompression calculation and return a DiveSummary.
 
     Args:
@@ -154,7 +155,14 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
             deco_gas_objs.append(_Gas(o2=o2, he=he, switch_depth=float(sd), label=label))
             deco_cyl_objs.append(_Cylinder(volume_litres=vol, fill_bar=pressure))
 
-    return _plan_dive(
+    # Travel gas (H2 dives): add as deco gas so it's used on ascent from h2_switch to lean_switch.
+    _tv_config = travel_gas_config  # (o2, he, bar, vol, switch_depth) or None
+    if _tv_config is not None:
+        tv_o2, tv_he, tv_bar, tv_vol, tv_switch = _tv_config
+        deco_gas_objs.append(_Gas(o2=tv_o2, he=tv_he, switch_depth=float(tv_switch), label='travel'))
+        deco_cyl_objs.append(_Cylinder(volume_litres=tv_vol, fill_bar=tv_bar))
+
+    summary = _plan_dive(
         depth=depth,
         bottom_time=bottom_time,
         back_gas=back_gas_obj,
@@ -168,6 +176,39 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
         deco_cylinders=deco_cyl_objs,
         descent_stops=descent_stops,
     )
+
+    if _tv_config is None:
+        return summary
+
+    # Correct gas accounting: descent to h2_switch was on travel gas, not back gas.
+    tv_o2, tv_he, tv_bar, tv_vol, tv_switch = _tv_config
+    descent_time_to_switch = tv_switch / _descent_rate
+    avg_p_descent = (SURFACE_PRESSURE + (SURFACE_PRESSURE + tv_switch / 10.0)) / 2.0
+    descent_travel_litres = _sac_bottom * descent_time_to_switch * avg_p_descent
+
+    back_usage = summary.gas_usage.get('back')
+    travel_usage = summary.gas_usage.get('travel')
+
+    back_consumed = (back_usage.consumed_litres if back_usage else 0.0) - descent_travel_litres
+    back_consumed = max(0.0, back_consumed)
+    travel_consumed = descent_travel_litres + (travel_usage.consumed_litres if travel_usage else 0.0)
+
+    # Rebuild gas_usage with corrected values (GasUsage.remaining_bar is a property, not a field)
+    from decodaitengu.types import GasUsage as _GasUsage
+    import dataclasses as _dc
+    new_usage = dict(summary.gas_usage)
+    if back_usage is not None:
+        new_usage['back'] = _dc.replace(back_usage, consumed_litres=back_consumed)
+    if travel_usage is not None:
+        new_usage['travel'] = _dc.replace(travel_usage, consumed_litres=travel_consumed)
+    else:
+        # Travel gas was present but engine didn't use it on ascent — create entry
+        new_usage['travel'] = _GasUsage(
+            gas=_Gas(o2=tv_o2, he=tv_he, switch_depth=float(tv_switch), label='travel'),
+            cylinder=_Cylinder(volume_litres=tv_vol, fill_bar=tv_bar),
+            consumed_litres=travel_consumed,
+        )
+    return _dc.replace(summary, gas_usage=new_usage)
 
 
 def format_gas_bar(used_litres, cylinder_vol, cylinder_pressure):
@@ -239,7 +280,8 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
                  sac_bottom=None, sac_deco=None,
                  lean_gas=None, lean_switch=None,
                  rich_gas=None, rich_switch=None,
-                 descent_stops=None):
+                 descent_stops=None,
+                 travel_gas_config=None):
     """Run a complete scenario and return results dict.
 
     cfg: optional dict with keys:
@@ -364,15 +406,20 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             lean_gas=_lean_gas, lean_switch=_lean_switch,
             rich_gas=_rich_gas, rich_switch=_rich_switch,
             descent_stops=descent_stops,
+            travel_gas_config=travel_gas_config,
         )
 
         back_usage = summary.gas_usage.get('back')
         lean_usage = summary.gas_usage.get('lean')
         rich_usage = summary.gas_usage.get('rich')
+        travel_usage = summary.gas_usage.get('travel')
 
         back_remaining = back_usage.remaining_bar if back_usage else _back_gas_pressure
         lean_remaining = lean_usage.remaining_bar if lean_usage else _deco_50_pressure
         rich_remaining = rich_usage.remaining_bar if rich_usage else _deco_o2_pressure
+        travel_remaining = travel_usage.remaining_bar if travel_usage else (
+            travel_gas_config[2] if travel_gas_config else None
+        )
 
         gas_used = {
             'back_gas': back_usage.consumed_litres if back_usage else 0.0,
@@ -390,6 +437,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         has_switch_stop = deco_gases_lost not in (True, 'lean')
         switch_depth = _lean_switch
         cylinders_result = None
+        travel_remaining = None
 
     # Build deco_stops and apply switch stop
     deco_stops = [(s.depth, s.time) for s in summary.stops]
@@ -429,6 +477,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         'back_remaining_bar': back_remaining,
         'lean_remaining_bar': lean_remaining,
         'rich_remaining_bar': rich_remaining,
+        'travel_remaining_bar': travel_remaining,
         'lean_gas': _lean_gas,
         'rich_gas': _rich_gas,
         'lean_switch': _lean_switch,
