@@ -530,8 +530,8 @@ table_rows["CNS %"] = [f"{r['cns']:.0f}%" for r in results]
 table_rows["END"] = [f"{(r['depth']+10)*(1-back_gas[1]/100)-10:.0f}m" for r in results]
 table_rows["PO2"] = [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f}" for r in results]
 table_rows["Gas density"] = [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth'], h2_pct=h2):.2f} g/L" for r in results]
-table_rows["   "] = [""] * len(results)
-_back_label = "H2 gas left" if (_h2_mode and h2 > 0) else "Back gas left"
+table_rows["Gas Left (Used/Remaining)"] = [""] * len(results)
+_back_label = f"Back gas ({back_gas[0]}/{back_gas[1]})" if not (_h2_mode and h2 > 0) else f"H2 gas ({back_gas[0]}/{back_gas[1]}/{h2})"
 table_rows[_back_label] = [
     f"{back_gas_pressure - r['back_remaining_bar']:.0f}/{r['back_remaining_bar']:.0f} bar"
     for r in results
