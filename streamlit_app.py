@@ -532,7 +532,9 @@ table_rows["  "] = [""] * len(results)
 table_rows["OTU"] = [f"{r['otu']:.0f}" for r in results]
 table_rows["CNS %"] = [f"{r['cns']:.0f}%" for r in results]
 table_rows["END"] = [
-    f"{(r['depth']+10)*(1 - back_gas[1]/100 - (back_gas[0]/100 if o2_narcotic else 0))-10:.0f}m"
+    # O2 narcotic: (depth+10)*(1-fHe)-10
+    # O2 non-narcotic (GUE, default): (depth+10)*(fN2/0.79)-10
+    f"{(r['depth']+10)*(1 - back_gas[1]/100 if o2_narcotic else (1 - back_gas[0]/100 - back_gas[1]/100)/0.79)-10:.0f}m"
     for r in results
 ]
 table_rows["PO2"] = [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f}" for r in results]
@@ -860,7 +862,7 @@ def _build_csv_bytes():
     w.writerow(["OTU"] + [f"{r['otu']:.0f}" for r in results])
     w.writerow(["CNS %"] + [f"{r['cns']:.0f}%" for r in results])
     w.writerow(["END"] + [
-        f"{(r['depth']+10)*(1 - back_gas[1]/100 - (back_gas[0]/100 if o2_narcotic else 0))-10:.0f}m"
+        f"{(r['depth']+10)*(1 - back_gas[1]/100 if o2_narcotic else (1 - back_gas[0]/100 - back_gas[1]/100)/0.79)-10:.0f}m"
         for r in results
     ])
     w.writerow(["PO2"] + [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f}" for r in results])
