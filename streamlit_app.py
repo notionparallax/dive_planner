@@ -192,6 +192,8 @@ with st.sidebar:
     sac_deco = int(col2.number_input("SAC deco (L/min)", min_value=10, max_value=30, value=_qpi("sac_dec", 17), step=1))
     gs_time = st.number_input("Gas switch time (min)", min_value=0.0, max_value=5.0, value=_qpf("gs_time", 1.0), step=0.5, key="gs_time_input", help="Time paused at each gas switch depth. 0 = switch on the fly.")
 
+    # Read o2_narcotic early so Best Mix Calculator can use it; checkbox defined in Settings below.
+    o2_narcotic = _qpb("o2_narc", False)
     with st.expander("🧪 Best Mix Calculator", expanded=False):
         _bm_depth = depth + 3  # deepest contingency
         st.caption(f"Calculated for {_bm_depth}m (deepest contingency = planned {depth}m + 3m) — safe at worst case")
@@ -199,15 +201,11 @@ with st.sidebar:
             "Target END (m)", min_value=10, max_value=40, value=30, step=1,
             help="Equivalent Narcotic Depth. GUE standard is 30m. Set lower for a more conservative mix.",
         )
-        bm_o2_narcotic = st.checkbox(
-            "O₂ is narcotic", value=False,
-            help="If checked, O₂ counts towards narcosis in the END calculation (some agencies use this model).",
-        )
         bm_po2 = st.number_input(
             "Max ppO₂ at depth (bar)", min_value=1.0, max_value=1.6, value=1.4, step=0.05, format="%.2f",
             help=f"O₂ fraction is set so ppO₂ exactly equals this at {_bm_depth}m (the contingency depth).",
         )
-        _bm = calculate_best_mix(_bm_depth, target_end=bm_end, max_po2_bottom=bm_po2, o2_narcotic=bm_o2_narcotic)
+        _bm = calculate_best_mix(_bm_depth, target_end=bm_end, max_po2_bottom=bm_po2, o2_narcotic=o2_narcotic)
         st.markdown(
             f"**Tx {_bm['o2']}/{_bm['he']}** &nbsp;·&nbsp; "
             f"ppO₂ {_bm['po2_at_depth']:.2f} bar at {_bm_depth}m &nbsp;·&nbsp; "
@@ -246,6 +244,12 @@ with st.sidebar:
             min_value=0, max_value=50, value=_qpi("min_res", 10), step=1,
             help="No cylinder may go below this pressure in any scenario, including the worst-case contingency. 10 bar is a practical floor — it's not usable gas but confirms the cylinder isn't empty.",
         )
+        o2_narcotic = st.checkbox(
+            "O₂ is narcotic",
+            value=o2_narcotic,
+            key="o2_narcotic_cb",
+            help="If checked, O₂ counts towards narcosis in the END calculation. GUE/WKPP treat O₂ as non-narcotic (default).",
+        )
 
 # Write URL params — only update keys whose values have changed to avoid render-loop race conditions
 def _qp_set(updates: dict):
@@ -270,7 +274,7 @@ _qp_set({
     "st": s_time if enable_stop else 1,
     "sac_bot": sac_bottom, "sac_dec": sac_deco, "gs_time": gs_time,
     "ppo2_bot": ppo2_bottom, "ppo2_ctol": ppo2_contingency_tol,
-    "dens_lim": density_limit, "cns_warn": cns_warn, "min_res": min_gas_reserve,
+    "dens_lim": density_limit, "cns_warn": cns_warn, "min_res": min_gas_reserve, "o2_narc": int(o2_narcotic),
 })
 if _travel_mode:
     _qp_set({"tv_o2": travel_o2, "tv_he": travel_he, "h2_sd": h2_switch,
@@ -527,7 +531,10 @@ table_rows["Turn pressure"] = [f"{r['min_gas']['bar_at_turn']:.0f}" for r in res
 table_rows["  "] = [""] * len(results)
 table_rows["OTU"] = [f"{r['otu']:.0f}" for r in results]
 table_rows["CNS %"] = [f"{r['cns']:.0f}%" for r in results]
-table_rows["END"] = [f"{(r['depth']+10)*(1-back_gas[1]/100)-10:.0f}m" for r in results]
+table_rows["END"] = [
+    f"{(r['depth']+10)*(1 - back_gas[1]/100 - (back_gas[0]/100 if o2_narcotic else 0))-10:.0f}m"
+    for r in results
+]
 table_rows["PO2"] = [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f}" for r in results]
 table_rows["Gas density"] = [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth'], h2_pct=h2):.2f} g/L" for r in results]
 table_rows["Gas Left (Used/Remaining)"] = [""] * len(results)
@@ -852,7 +859,10 @@ def _build_csv_bytes():
     w.writerow([])
     w.writerow(["OTU"] + [f"{r['otu']:.0f}" for r in results])
     w.writerow(["CNS %"] + [f"{r['cns']:.0f}%" for r in results])
-    w.writerow(["END"] + [f"{(r['depth']+10)*(1-back_gas[1]/100)-10:.0f}m" for r in results])
+    w.writerow(["END"] + [
+        f"{(r['depth']+10)*(1 - back_gas[1]/100 - (back_gas[0]/100 if o2_narcotic else 0))-10:.0f}m"
+        for r in results
+    ])
     w.writerow(["PO2"] + [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f}" for r in results])
     w.writerow(["Gas density g/L"] + [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth']):.2f}" for r in results])
     w.writerow([])
