@@ -190,6 +190,7 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     sac_bottom = int(col1.number_input("SAC bottom (L/min)", min_value=10, max_value=40, value=_qpi("sac_bot", 20), step=1))
     sac_deco = int(col2.number_input("SAC deco (L/min)", min_value=10, max_value=30, value=_qpi("sac_dec", 17), step=1))
+    gs_time = st.number_input("Gas switch time (min)", min_value=0.0, max_value=5.0, value=float(_qp.get("gs_time", "1.0")), step=0.5, key="gs_time_input", help="Time paused at each gas switch depth. 0 = switch on the fly.")
 
     with st.expander("🧪 Best Mix Calculator", expanded=False):
         _bm_depth = depth + 3  # deepest contingency
@@ -267,7 +268,7 @@ _qp_set({
     "sdrill": int(enable_stop),
     "sd": s_depth if enable_stop else 5,
     "st": s_time if enable_stop else 1,
-    "sac_bot": sac_bottom, "sac_dec": sac_deco,
+    "sac_bot": sac_bottom, "sac_dec": sac_deco, "gs_time": gs_time,
     "ppo2_bot": ppo2_bottom, "ppo2_ctol": ppo2_contingency_tol,
     "dens_lim": density_limit, "cns_warn": cns_warn, "min_res": min_gas_reserve,
 })
@@ -299,7 +300,7 @@ _EMERGENCY_ASCENT_RATE = 18  # m/min — fast but survivable
 
 @st.cache_data
 def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd, dst,
-                       lean_gas, lean_switch, rich_gas, rich_switch, travel_gas_config=None):
+                       lean_gas, lean_switch, rich_gas, rich_switch, travel_gas_config=None, gas_switch_time=1.0):
     D = depth
     descent_stops = list(dst) if dst else None
     # ar may be a float or a tuple of (max_depth, rate) pairs
@@ -329,6 +330,7 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
             rich_gas=rich_gas, rich_switch=rich_switch,
             descent_stops=descent_stops,
             travel_gas_config=travel_gas_config,
+            gas_switch_time=gas_switch_time,
         )
         r["leave_time"] = bt
         r["tag"] = tag
@@ -347,6 +349,7 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
         rich_gas=rich_gas, rich_switch=rich_switch,
         descent_stops=descent_stops,
         travel_gas_config=travel_gas_config,
+        gas_switch_time=gas_switch_time,
     )
     emerg["leave_time"] = T
     emerg["tag"] = "Emergency\n(GF99/99)"
@@ -377,6 +380,7 @@ with st.spinner("Computing…"):
         descent_stops_tuple,
         (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
         travel_gas_config=_tv_config,
+        gas_switch_time=gs_time,
     )
 
 if _h2_mode:
