@@ -532,18 +532,23 @@ table_rows["PO2"] = [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f
 table_rows["Gas density"] = [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth'], h2_pct=h2):.2f} g/L" for r in results]
 table_rows["   "] = [""] * len(results)
 _back_label = "H2 gas left" if (_h2_mode and h2 > 0) else "Back gas left"
-table_rows[_back_label] = [f"{r['back_remaining_bar']:.0f} bar" for r in results]
+table_rows[_back_label] = [
+    f"{back_gas_pressure - r['back_remaining_bar']:.0f}/{r['back_remaining_bar']:.0f} bar"
+    for r in results
+]
 table_rows[f"Lean ({lean_o2}/{lean_he})"] = [
-    "--" if r["deco_gases_lost"] in (True, "lean") else f"{r['lean_remaining_bar']:.0f} bar"
+    "--" if r["deco_gases_lost"] in (True, "lean")
+    else f"{deco_50_pressure - r['lean_remaining_bar']:.0f}/{r['lean_remaining_bar']:.0f} bar"
     for r in results
 ]
 table_rows[f"Rich ({rich_o2}/{rich_he})"] = [
-    "--" if r["deco_gases_lost"] in (True, "rich") else f"{r['rich_remaining_bar']:.0f} bar"
+    "--" if r["deco_gases_lost"] in (True, "rich")
+    else f"{deco_o2_pressure - r['rich_remaining_bar']:.0f}/{r['rich_remaining_bar']:.0f} bar"
     for r in results
 ]
 if _travel_mode:
     table_rows[f"Travel ({travel_o2}/{travel_he})"] = [
-        f"{r['travel_remaining_bar']:.0f} bar" if r.get('travel_remaining_bar') is not None else "--"
+        f"{travel_bar - r['travel_remaining_bar']:.0f}/{r['travel_remaining_bar']:.0f} bar" if r.get('travel_remaining_bar') is not None else "--"
         for r in results
     ]
     _tg = calc_travel_gas_min(
@@ -851,9 +856,9 @@ def _build_csv_bytes():
     w.writerow(["PO2"] + [f"{(SURFACE_PRESSURE + r['depth']/10)*(back_gas[0]/100):.2f}" for r in results])
     w.writerow(["Gas density g/L"] + [f"{_gas_density_gl(back_gas[0], back_gas[1], r['depth']):.2f}" for r in results])
     w.writerow([])
-    w.writerow(["Back gas left"] + [f"{r['back_remaining_bar']:.0f}" for r in results])
-    w.writerow([f"Lean ({lean_o2}/{lean_he})"] + ["--" if r["deco_gases_lost"] in (True, "lean") else f"{r['lean_remaining_bar']:.0f}" for r in results])
-    w.writerow([f"Rich ({rich_o2}/{rich_he})"] + ["--" if r["deco_gases_lost"] in (True, "rich") else f"{r['rich_remaining_bar']:.0f}" for r in results])
+    w.writerow(["Back gas left"] + [f"{back_gas_pressure - r['back_remaining_bar']:.0f}/{r['back_remaining_bar']:.0f}" for r in results])
+    w.writerow([f"Lean ({lean_o2}/{lean_he})"] + ["--" if r["deco_gases_lost"] in (True, "lean") else f"{deco_50_pressure - r['lean_remaining_bar']:.0f}/{r['lean_remaining_bar']:.0f}" for r in results])
+    w.writerow([f"Rich ({rich_o2}/{rich_he})"] + ["--" if r["deco_gases_lost"] in (True, "rich") else f"{deco_o2_pressure - r['rich_remaining_bar']:.0f}/{r['rich_remaining_bar']:.0f}" for r in results])
     w.writerow([])
     w.writerow(["ASSUMPTIONS"])
     w.writerow(["SAC", f"{sac_bottom} L/min (bottom)", f"{sac_deco} L/min (deco)"])
