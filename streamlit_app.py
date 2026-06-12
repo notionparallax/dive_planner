@@ -424,6 +424,7 @@ def _ppo2_limit_for(tag: str) -> float:
 
 # Per-result warning strings (for expander) and emoji sets (for column headers)
 _col_warnings: list[list[str]] = [[] for _ in results]
+_icd_warnings_seen: set[str] = set()  # deduplicate ICD warnings across scenarios
 for i, r in enumerate(results):
     tag = r["tag"].replace("\n", " ")
     if r["cns"] >= _CNS_WARN:
@@ -442,6 +443,8 @@ for i, r in enumerate(results):
             f"⚠️ **{tag}**: back gas ppO₂ {ppo2:.2f} bar at {r['depth']}m "
             f"(limit {_limit:.2f} bar)"
         )
+    for w in r.get("icd_warnings", []):
+        _icd_warnings_seen.add(w)
 
 # Constraining scenario: first 8 results match the auto-timer contingency scenarios
 _constraint_scenarios = results[:8]
@@ -457,6 +460,16 @@ def _gas_margin(r):
 _constraint_idx = min(range(len(_constraint_scenarios)), key=lambda i: _gas_margin(_constraint_scenarios[i]))
 
 all_warnings = [w for ws in _col_warnings for w in ws]
+if _icd_warnings_seen:
+    with st.expander(f"🫧 {len(_icd_warnings_seen)} isobaric counterdiffusion warning(s)", expanded=True):
+        st.markdown(
+            "**ICD risk** occurs when switching to a gas with more N₂ while fast inert gases "
+            "(He, H₂) are still in your tissues. This can cause bubble formation even without "
+            "any pressure change. Consider a slower ascent rate, longer stops at the switch depth, "
+            "or an intermediate gas to reduce the N₂ step change."
+        )
+        for w in sorted(_icd_warnings_seen):
+            st.markdown(f"- {w}")
 if all_warnings:
     with st.expander(f"⚠️ {len(all_warnings)} warning(s)", expanded=True):
         for w in all_warnings:

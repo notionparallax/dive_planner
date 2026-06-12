@@ -456,6 +456,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         'rich_switch': _rich_switch,
         'min_gas': min_gas,
         'max_gas_density': summary.max_gas_density,
+        'icd_warnings': summary.icd_warnings,
     }
     result['ceiling_profile'] = summary.ceiling_profile
     result['gas_pressure_profile'] = summary.gas_pressure_profile
