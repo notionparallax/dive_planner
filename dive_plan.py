@@ -888,7 +888,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         lean_gas=None, lean_switch=None,
                         rich_gas=None, rich_switch=None,
                         min_reserve=10,
-                        descent_stops=None):
+                        descent_stops=None,
+                        gas_switch_time=None):
     """
     Find the maximum bottom time satisfying the gas rule.
 
@@ -953,7 +954,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                      gf_low=_gf_low, gf_high=_gf_high,
                                      descent_rate=_descent_rate, ascent_rate=_ascent_rate,
                                      sac_bottom=_sac_bottom, sac_deco=_sac_deco,
-                                     descent_stops=descent_stops)
+                                     descent_stops=descent_stops,
+                                     gas_switch_time=gas_switch_time)
                     if r['back_remaining_bar'] < min_reserve:
                         ok = False
                         break
@@ -977,7 +979,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                  gf_low=_gf_low, gf_high=_gf_high,
                                  descent_rate=_descent_rate, ascent_rate=_ascent_rate,
                                  sac_bottom=_sac_bottom, sac_deco=_sac_deco,
-                                 descent_stops=descent_stops)
+                                 descent_stops=descent_stops,
+                                 gas_switch_time=gas_switch_time)
                 ok = r['min_gas']['bar_at_turn'] >= thirds_pressure
             if ok:
                 best = mid

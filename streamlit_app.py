@@ -190,7 +190,7 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     sac_bottom = int(col1.number_input("SAC bottom (L/min)", min_value=10, max_value=40, value=_qpi("sac_bot", 20), step=1))
     sac_deco = int(col2.number_input("SAC deco (L/min)", min_value=10, max_value=30, value=_qpi("sac_dec", 17), step=1))
-    gs_time = st.number_input("Gas switch time (min)", min_value=0.0, max_value=5.0, value=float(_qp.get("gs_time", "1.0")), step=0.5, key="gs_time_input", help="Time paused at each gas switch depth. 0 = switch on the fly.")
+    gs_time = st.number_input("Gas switch time (min)", min_value=0.0, max_value=5.0, value=_qpf("gs_time", 1.0), step=0.5, key="gs_time_input", help="Time paused at each gas switch depth. 0 = switch on the fly.")
 
     with st.expander("🧪 Best Mix Calculator", expanded=False):
         _bm_depth = depth + 3  # deepest contingency
@@ -281,7 +281,7 @@ if _travel_mode:
 @st.cache_data
 def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd,
                   lean_gas, lean_switch, rich_gas, rich_switch, min_reserve=10,
-                  descent_stops=None):
+                  descent_stops=None, gas_switch_time=None):
     return find_max_bottom_time(
         depth, back_gas,
         back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
@@ -292,6 +292,7 @@ def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, d
         rich_gas=rich_gas, rich_switch=rich_switch,
         min_reserve=min_reserve,
         descent_stops=descent_stops,
+        gas_switch_time=gas_switch_time,
     )
 
 
@@ -369,7 +370,8 @@ with st.spinner("Computing…"):
                       gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
                       (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
                       min_gas_reserve,
-                      descent_stops=descent_stops_tuple)
+                      descent_stops=descent_stops_tuple,
+                      gas_switch_time=gs_time)
         if auto_time else manual_bt_val
     )
     results, scenario_defs = _compute_scenarios(
