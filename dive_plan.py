@@ -660,9 +660,10 @@ def calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4, o2_narcotic=Fal
         # O2 counts as narcotic: He_frac = 1 - (END + 10) / (depth + 10)
         he_frac = 1.0 - (target_end + 10.0) / (depth + 10.0)
     else:
-        # Only N2 is narcotic: N2_frac = (END + 10) / (depth + 10)
-        # N2_frac = 1 - o2_frac - he_frac  →  he_frac = 1 - o2_frac - N2_target
-        n2_target = (target_end + 10.0) / (depth + 10.0)
+        # Only N2 is narcotic. At END depth breathing air, narcotic N2 partial
+        # pressure = (END+10) * 0.79. We want the same N2 partial pressure at depth:
+        #   N2_frac * (depth+10) = 0.79 * (END+10)  →  N2_frac = 0.79*(END+10)/(depth+10)
+        n2_target = 0.79 * (target_end + 10.0) / (depth + 10.0)
         he_frac = 1.0 - o2_frac - n2_target
 
     he_frac = max(0.0, he_frac)
@@ -683,7 +684,8 @@ def calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4, o2_narcotic=Fal
     if o2_narcotic:
         actual_end = (depth + 10) * (1 - he_frac) - 10
     else:
-        actual_end = (depth + 10) * n2_frac - 10
+        # END = (depth+10)*n2_frac/0.79 - 10
+        actual_end = (depth + 10) * n2_frac / 0.79 - 10
 
     return {
         'o2': o2_pct,
