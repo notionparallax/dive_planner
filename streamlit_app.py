@@ -449,7 +449,7 @@ def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, d
         min_reserve=min_reserve,
         descent_stops=descent_stops,
         gas_switch_time=gas_switch_time,
-        contingency_scenarios=list(contingency_scenarios) if contingency_scenarios else None,
+        contingency_scenarios=[dict(s) for s in contingency_scenarios] if contingency_scenarios else None,
         travel_gas_config=travel_gas_config,
     )
 
