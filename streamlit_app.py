@@ -420,6 +420,56 @@ def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, d
     )
 
 
+@st.cache_data
+def _get_max_time_custom(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd,
+                         lean_gas, lean_switch, rich_gas, rich_switch, min_reserve=10,
+                         descent_stops=None, gas_switch_time=None, travel_gas_config=None,
+                         scenario_rows=None):
+    """Binary search for max bottom time constrained by all custom scenario rows."""
+    dst = list(descent_stops) if descent_stops else None
+    ar_val = list(ar) if isinstance(ar, tuple) and ar and isinstance(ar[0], tuple) else ar
+    rows = [dict(r) for r in scenario_rows] if scenario_rows else []
+    rows = [r for r in rows if r.get("enabled") is not False]
+
+    lo, hi, best = 1, 120, 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        ok = True
+        try:
+            for row in rows:
+                kw = _row_to_call_kwargs(row, depth, mid, gfl, gfh, ar_val, sb, sd)
+                r = run_scenario(
+                    "test", kw["depth"], kw["bottom_time"],
+                    deco_gases_lost=kw["deco_gases_lost"],
+                    back_gas=back_gas,
+                    back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
+                    back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
+                    gf_low=kw["gf_low"], gf_high=kw["gf_high"],
+                    descent_rate=dr, ascent_rate=kw["ascent_rate"],
+                    sac_bottom=kw["sac_bottom"], sac_deco=kw["sac_deco"],
+                    lean_gas=lean_gas, lean_switch=lean_switch,
+                    rich_gas=rich_gas, rich_switch=rich_switch,
+                    descent_stops=dst,
+                    travel_gas_config=travel_gas_config,
+                    gas_switch_time=gas_switch_time,
+                )
+                lost = kw["deco_gases_lost"]
+                if r["back_remaining_bar"] < min_reserve:
+                    ok = False; break
+                if lost not in (True, "lean") and not isinstance(lost, list) and r["lean_remaining_bar"] < min_reserve:
+                    ok = False; break
+                if lost not in (True, "rich") and not isinstance(lost, list) and r["rich_remaining_bar"] < min_reserve:
+                    ok = False; break
+        except Exception:
+            ok = False
+        if ok:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
 _EMERGENCY_ASCENT_RATE = 18  # m/min — fast but survivable
 
 @st.cache_data
@@ -510,16 +560,31 @@ _scenario_rows_cache = _df_to_scenario_rows_tuple(st.session_state["scenarios_df
 
 with st.spinner("Computing…"):
     _tv_config = (travel_o2, travel_he, travel_bar, travel_vol, h2_switch) if _travel_mode else None
-    T = (
-        _get_max_time(depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
-                      back_gas_vol, deco_50_vol, deco_o2_vol,
-                      gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
-                      (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
-                      min_gas_reserve,
-                      descent_stops=descent_stops_tuple,
-                      gas_switch_time=gs_time)
-        if auto_time else manual_bt_val
-    )
+    if auto_time:
+        if _scenario_rows_cache:
+            T = _get_max_time_custom(
+                depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
+                back_gas_vol, deco_50_vol, deco_o2_vol,
+                gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
+                (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
+                min_gas_reserve,
+                descent_stops=descent_stops_tuple,
+                gas_switch_time=gs_time,
+                travel_gas_config=_tv_config,
+                scenario_rows=_scenario_rows_cache,
+            )
+        else:
+            T = _get_max_time(
+                depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
+                back_gas_vol, deco_50_vol, deco_o2_vol,
+                gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
+                (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
+                min_gas_reserve,
+                descent_stops=descent_stops_tuple,
+                gas_switch_time=gs_time,
+            )
+    else:
+        T = manual_bt_val
     results, scenario_defs = _compute_scenarios(
         back_gas, depth, T,
         back_gas_pressure, deco_50_pressure, deco_o2_pressure,
