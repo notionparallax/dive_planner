@@ -67,6 +67,238 @@ from scenario_helpers import (  # noqa: E402
     _row_to_call_kwargs, _build_contingency_specs,
     _scenarios_to_b64, _b64_to_scenarios_df,
 )
+
+with st.sidebar:
+    st.title("🤿 Dive Planner")
+
+    st.subheader("Depth & Time")
+    depth = int(st.number_input("Depth (m)", min_value=10, max_value=80, value=_qpi("depth", 48), step=1))
+    auto_time = st.checkbox("Auto bottom time", value=_qpb("auto_time", True),
+                            help="Find max bottom time where all contingency scenarios (deeper, longer, lost deco gas) have gas remaining")
+    manual_bt_val = None
+    if not auto_time:
+        manual_bt_val = int(st.number_input("Bottom time (min)", min_value=5, max_value=120, value=_qpi("manual_bt", 31), step=1))
+
+    st.subheader("Gases & Cylinders")
+    _bm_o2 = st.session_state.pop("_bm_apply_o2", None)
+    _bm_he = st.session_state.pop("_bm_apply_he", None)
+    _h2_mode     = st.session_state.get("_h2_mode", False)
+    _travel_mode = st.session_state.get("_travel_mode", False)
+
+    # Travel row prepended when back gas is hypoxic (O2% < 18)
+    _bi = 1 if _travel_mode else 0   # back-gas row index
+    _labels = (["Travel"] if _travel_mode else []) + ["Back", "Lean", "Rich"]
+    _tv   = [_qpi("tv_o2",  21)]  if _travel_mode else []
+    _th   = [_qpi("tv_he",   0)]  if _travel_mode else []
+    _tb   = [_qpi("tv_bar", 230)] if _travel_mode else []
+    _tvol = [_qpf("tv_vol", 24.4)] if _travel_mode else []
+    _gas_defaults_data = {
+        "Gas":  _labels,
+        "O2%":  _tv   + [_bm_o2 if _bm_o2 is not None else _qpi("o2", 21), _qpi("lo2", 50), _qpi("ro2", 100)],
+        "He%":  _th   + [_bm_he if _bm_he is not None else _qpi("he",  0), _qpi("lhe",  0), _qpi("rhe",   0)],
+    }
+    if _h2_mode:
+        _gas_defaults_data["H2%"] = ([0] if _travel_mode else []) + [_qpi("h2_bg", 0), 0, 0]
+    _gas_defaults_data["Bar"]    = _tb   + [_qpi("bgp", 230), _qpi("lp",  200), _qpi("rp",  200)]
+    _gas_defaults_data["Litres"] = _tvol + [_qpf("bgv", 24.4), _qpf("lv", 11.1), _qpf("rv", 11.1)]
+
+    _col_config_gas = {
+        "Gas":    st.column_config.TextColumn(disabled=True, width="small"),
+        "O2%":    st.column_config.NumberColumn(min_value=1, max_value=100, step=1, format="%d", width="small",
+                                                help="Back gas O2% < 18% adds a Travel row. ≤ 4% enables 🧪 H₂ mode."),
+        "He%":    st.column_config.NumberColumn(min_value=0,   max_value=90,  step=1,   format="%d", width="small"),
+        "Bar":    st.column_config.NumberColumn(min_value=50,  max_value=300, step=5,   format="%d", width="small"),
+        "Litres": st.column_config.NumberColumn(min_value=3.0, max_value=30.0, step=0.1, format="%.1f", width="small"),
+    }
+    if _h2_mode:
+        _col_config_gas["H2%"] = st.column_config.NumberColumn(min_value=0, max_value=95, step=1, format="%d", width="small")
+    _gas_table = st.data_editor(
+        pd.DataFrame(_gas_defaults_data),
+        column_config=_col_config_gas,
+        hide_index=True,
+        width='stretch',
+        key="gas_table",
+        num_rows="fixed",
+    )
+    o2  = int(_gas_table.iloc[_bi]["O2%"])
+    he  = int(_gas_table.iloc[_bi]["He%"])
+    h2  = int(_gas_table.iloc[_bi]["H2%"]) if (_h2_mode and "H2%" in _gas_table.columns) else 0
+    st.session_state["_h2_mode"]     = (o2 <= 4)
+    st.session_state["_travel_mode"] = (o2 < 18)
+    back_gas_pressure = int(_gas_table.iloc[_bi]["Bar"])
+    back_gas_vol      = float(_gas_table.iloc[_bi]["Litres"])
+    lean_o2      = int(_gas_table.iloc[_bi + 1]["O2%"])
+    lean_he      = int(_gas_table.iloc[_bi + 1]["He%"])
+    lean_switch  = int(calc_switch_depth(lean_o2 / 100.0))
+    deco_50_pressure = int(_gas_table.iloc[_bi + 1]["Bar"])
+    deco_50_vol  = float(_gas_table.iloc[_bi + 1]["Litres"])
+    rich_o2      = int(_gas_table.iloc[_bi + 2]["O2%"])
+    rich_he      = int(_gas_table.iloc[_bi + 2]["He%"])
+    rich_switch  = int(calc_switch_depth(rich_o2 / 100.0))
+    deco_o2_pressure = int(_gas_table.iloc[_bi + 2]["Bar"])
+    deco_o2_vol  = float(_gas_table.iloc[_bi + 2]["Litres"])
+    back_gas = (o2, he, h2)
+
+    if _travel_mode:
+        travel_o2  = int(_gas_table.iloc[0]["O2%"])
+        travel_he  = int(_gas_table.iloc[0]["He%"])
+        travel_bar = int(_gas_table.iloc[0]["Bar"])
+        travel_vol = float(_gas_table.iloc[0]["Litres"])
+        _sw_label = "Switch to H2 gas at (m)" if _h2_mode else "Switch to back gas at (m)"
+        _sw_help  = ("Depth where you switch from travel gas to H2 back gas (~40 m typical)."
+                     if _h2_mode else "Depth where you switch from travel gas to back gas.")
+        h2_switch = int(st.number_input(_sw_label, min_value=0, max_value=60,
+                                        value=_qpi("h2_sd", 40), step=5, help=_sw_help, key="h2_sd_inp"))
+    else:
+        travel_o2, travel_he, h2_switch = 21, 0, 40
+        travel_bar, travel_vol = 230, 24.4
+
+    st.subheader("Deco Model")
+    col1, col2 = st.columns(2)
+    gf_low = col1.number_input("GF low %", min_value=10, max_value=100, value=_qpi("gfl", 50), step=5) / 100
+    gf_high = col2.number_input("GF high %", min_value=10, max_value=100, value=_qpi("gfh", 80), step=5) / 100
+
+    st.subheader("Rates")
+    col1, col2 = st.columns(2)
+    descent_rate = int(col1.number_input("Descent (m/min)", min_value=5, max_value=40, value=_qpi("dr", 20), step=1))
+    ascent_rate = int(col2.number_input("Ascent deep (m/min)", min_value=3, max_value=20, value=_qpi("ar", 10), step=1,
+                                        help="Ascent rate from depth to 6m."))
+    col1, col2 = st.columns(2)
+    _ar_s_default = _qpf("ar_s", 3.0)
+    ascent_rate_shallow = col1.number_input("Ascent shallow (m/min)", min_value=0.5, max_value=10.0,
+                                            value=_ar_s_default, step=0.5, format="%.1f",
+                                            help="Ascent rate from 6m to surface.")
+    # Build segmented ascent profile: fast to 6m, slow 6m→surface
+    if ascent_rate_shallow != ascent_rate:
+        ascent_rate_profile = [(6, float(ascent_rate)), (0, float(ascent_rate_shallow))]
+    else:
+        ascent_rate_profile = float(ascent_rate)
+
+    st.subheader("Descent Stop (S-drill)")
+    enable_stop = st.checkbox("Enable S-drill stop", value=_qpb("sdrill", False))
+    descent_stops_tuple = None
+    s_depth = _qpi("sd", 5)
+    s_time = _qpi("st", 1)
+    if enable_stop:
+        col1, col2 = st.columns(2)
+        s_depth = int(col1.number_input("Depth (m)", min_value=3, max_value=20, value=s_depth, step=1))
+        s_time = int(col2.number_input("Duration (min)", min_value=1, max_value=30, value=s_time, step=1))
+        descent_stops_tuple = ((s_depth, s_time),)
+
+    # In travel mode, add a 1-min descent stop at h2_switch for the gas switch
+    if _travel_mode:
+        tv_stop = (h2_switch, 1)
+        if descent_stops_tuple:
+            descent_stops_tuple = descent_stops_tuple + (tv_stop,)
+        else:
+            descent_stops_tuple = (tv_stop,)
+
+    st.subheader("Gas Consumption")
+    col1, col2 = st.columns(2)
+    sac_bottom = int(col1.number_input("SAC bottom (L/min)", min_value=10, max_value=40, value=_qpi("sac_bot", 20), step=1))
+    sac_deco = int(col2.number_input("SAC deco (L/min)", min_value=10, max_value=30, value=_qpi("sac_dec", 17), step=1))
+    gs_time = st.number_input("Gas switch time (min)", min_value=0.0, max_value=5.0, value=_qpf("gs_time", 1.0), step=0.5, key="gs_time_input", help="Time paused at each gas switch depth. 0 = switch on the fly.")
+
+    # Read o2_narcotic early so Best Mix Calculator can use it; checkbox defined in Settings below.
+    o2_narcotic = _qpb("o2_narc", False)
+    with st.expander("🧪 Best Mix Calculator", expanded=False):
+        # Deepest contingency: scan enabled scenario rows for the worst-case depth.
+        # We can't use `results` here (sidebar runs before compute), so parse the df directly.
+        _scen_rows_bm = st.session_state.get("scenarios_df")
+        if _scen_rows_bm is not None:
+            _enabled_rows = _scen_rows_bm[_scen_rows_bm["enabled"].astype(bool)]
+            _candidate_depths = [_parse_dim(str(r["depth"]), depth) for _, r in _enabled_rows.iterrows()]
+            _bm_depth = max(_candidate_depths) if _candidate_depths else depth + 3
+        else:
+            _bm_depth = depth + 3
+        if _bm_depth == depth:
+            st.caption(f"Calculated for {_bm_depth}m (no deeper contingency scenario enabled)")
+        else:
+            st.caption(f"Calculated for {_bm_depth}m (deepest enabled scenario) — safe at worst case")
+        bm_end = st.number_input(
+            "Target END (m)", min_value=10, max_value=40, value=30, step=1,
+            help="Equivalent Narcotic Depth. GUE standard is 30m. Set lower for a more conservative mix.",
+        )
+        bm_po2 = st.number_input(
+            "Max ppO₂ at depth (bar)", min_value=1.0, max_value=1.6, value=1.4, step=0.05, format="%.2f",
+            help=f"O₂ fraction is set so ppO₂ exactly equals this at {_bm_depth}m (the contingency depth).",
+        )
+        _bm = calculate_best_mix(_bm_depth, target_end=bm_end, max_po2_bottom=bm_po2, o2_narcotic=o2_narcotic)
+        st.markdown(
+            f"**Tx {_bm['o2']}/{_bm['he']}** &nbsp;·&nbsp; "
+            f"ppO₂ {_bm['po2_at_depth']:.2f} bar at {_bm_depth}m &nbsp;·&nbsp; "
+            f"END {_bm['end']:.0f}m"
+        )
+        if st.button("Apply to back gas ↑", key="apply_best_mix"):
+            st.session_state["_bm_apply_o2"] = _bm["o2"]
+            st.session_state["_bm_apply_he"] = _bm["he"]
+            st.rerun()
+
+    with st.expander("⚙️ Settings", expanded=False):
+        st.caption("Warning thresholds")
+        ppo2_bottom = st.number_input(
+            "ppO₂ bottom limit (bar)",
+            min_value=1.0, max_value=1.6, value=_qpf("ppo2_bot", 1.4), step=0.05, format="%.2f",
+            help="Back gas ppO₂ above this triggers a warning on the main dive and standard scenarios. GUE/WKPP standard: 1.4 bar.",
+        )
+        ppo2_contingency_tol = st.number_input(
+            "Contingency ppO₂ tolerance (bar)",
+            min_value=0.0, max_value=0.3, value=_qpf("ppo2_ctol", 0.02), step=0.01, format="%.2f",
+            help=f"Extra headroom added to the bottom limit for contingency scenarios (Deeper / Longer / D&L). "
+                 f"At defaults: contingency limit = {_qpf('ppo2_bot', 1.4):.2f} + {_qpf('ppo2_ctol', 0.02):.2f} = {_qpf('ppo2_bot', 1.4) + _qpf('ppo2_ctol', 0.02):.2f} bar.",
+        )
+        density_limit = st.number_input(
+            "Gas density limit (g/L)",
+            min_value=4.0, max_value=10.0, value=_qpf("dens_lim", 6.2), step=0.1, format="%.1f",
+            help="Warn if back gas density exceeds this value. GUE/WKPP limit is 6.2 g/L; above this CNS risk increases.",
+        )
+        cns_warn = st.number_input(
+            "CNS warn threshold (%)",
+            min_value=50, max_value=100, value=_qpi("cns_warn", 80), step=5,
+            help="Warn if CNS oxygen toxicity reaches this percentage in any scenario. Single-dive limit is 80%; NOAA allows 100% for working divers.",
+        )
+        min_gas_reserve = st.number_input(
+            "Minimum gas reserve (bar)",
+            min_value=0, max_value=50, value=_qpi("min_res", 10), step=1,
+            help="No cylinder may go below this pressure in any scenario, including the worst-case contingency. 10 bar is a practical floor — it's not usable gas but confirms the cylinder isn't empty.",
+        )
+        o2_narcotic = st.checkbox(
+            "O₂ is narcotic",
+            value=o2_narcotic,
+            key="o2_narcotic_cb",
+            help="If checked, O₂ counts towards narcosis in the END calculation. GUE/WKPP treat O₂ as non-narcotic (default).",
+        )
+
+# Write URL params — only update keys whose values have changed to avoid render-loop race conditions
+def _qp_set(updates: dict):
+    """Write only changed query params to prevent re-render races on fast typing."""
+    changed = {k: str(v) for k, v in updates.items() if str(st.query_params.get(k, "")) != str(v)}
+    if changed:
+        st.query_params.update(changed)
+
+_qp_set({
+    "o2": o2, "he": he, "depth": depth,
+    "h2_bg": h2,
+    "auto_time": int(auto_time), "manual_bt": manual_bt_val or 31,
+    "bgp": back_gas_pressure, "bgv": back_gas_vol,
+    "lp": deco_50_pressure, "lv": deco_50_vol,
+    "rp": deco_o2_pressure, "rv": deco_o2_vol,
+    "lo2": lean_o2, "lhe": lean_he,
+    "ro2": rich_o2, "rhe": rich_he,
+    "gfl": int(gf_low * 100), "gfh": int(gf_high * 100),
+    "dr": descent_rate, "ar": ascent_rate, "ar_s": ascent_rate_shallow,
+    "sdrill": int(enable_stop),
+    "sd": s_depth if enable_stop else 5,
+    "st": s_time if enable_stop else 1,
+    "sac_bot": sac_bottom, "sac_dec": sac_deco, "gs_time": gs_time,
+    "ppo2_bot": ppo2_bottom, "ppo2_ctol": ppo2_contingency_tol,
+    "dens_lim": density_limit, "cns_warn": cns_warn, "min_res": min_gas_reserve, "o2_narc": int(o2_narcotic),
+})
+if _travel_mode:
+    _qp_set({"tv_o2": travel_o2, "tv_he": travel_he, "h2_sd": h2_switch,
+             "tv_bar": travel_bar, "tv_vol": travel_vol})
+
+
 # ─── Compute ──────────────────────────────────────────────────────────────────
 @st.cache_data
 def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd,
@@ -709,6 +941,7 @@ fig.update_yaxes(title_text="Pressure (bar)", rangemode="tozero", row=2, col=1)
 fig.update_xaxes(title_text="Time (min)", row=2, col=1)
 
 st.plotly_chart(fig, width='stretch')
+
 
 # ─── Fill cost calculator ─────────────────────────────────────────────────────
 with st.expander("💰 Fill Cost Calculator", expanded=False):
