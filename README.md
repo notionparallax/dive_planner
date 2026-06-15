@@ -157,7 +157,7 @@ H2 (hydrogen) support is experimental with unvalidated coefficients — do not u
 
 ## Dependencies
 
-```
+```requirements
 decodaitengu>=1.4.0
 streamlit>=1.32
 plotly>=5.20
