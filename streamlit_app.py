@@ -824,12 +824,13 @@ st.dataframe(
 )
 
 # ─── Scenario selector ────────────────────────────────────────────────────────
-tags = [r["tag"] for r in results]
+_feasible_results = [r for r in results if not r.get("infeasible")]
+tags = [r["tag"] for r in _feasible_results]
 selected_tag = st.radio(
     "Scenario (controls ceiling band + gas chart):",
     tags, horizontal=True, index=0,
 )
-sel = next(r for r in results if r["tag"] == selected_tag)
+sel = next(r for r in _feasible_results if r["tag"] == selected_tag)
 
 # ─── Charts ───────────────────────────────────────────────────────────────────
 st.subheader("Dive Profiles")
@@ -896,7 +897,7 @@ if cp:
         t_vals = [t for t, d, c in cp_deco]
         d_vals = [d for t, d, c in cp_deco]
         c_vals = [c for t, d, c in cp_deco]
-        sel_color = COLORS[tags.index(selected_tag)]
+        sel_color = COLORS[tags.index(selected_tag) % len(COLORS)]
 
         fig.add_trace(
             go.Scatter(
