@@ -326,19 +326,29 @@ def _default_scenario_rows(lean_o2_pct: int, rich_o2_pct: int) -> list[dict]:
 
 
 def _parse_dim(val: str, base: int) -> int:
-    """Parse a depth/time cell: '+3' -> base+3, '45' -> 45. Empty -> base."""
+    """Parse a depth/time cell: '+3' -> base+3, '45' -> 45. Empty/None/NaN -> base."""
+    import math
+    if val is None:
+        return base
+    try:
+        if math.isnan(float(val)):
+            return base
+    except (TypeError, ValueError):
+        pass
     v = str(val).strip()
-    if not v:
+    if not v or v.lower() in ('nan', 'none', 'null'):
         return base
     if v.startswith('+') or v.startswith('-'):
         return base + int(v)
-    return int(v)
+    return int(float(v))
 
 
 def _resolve_lost(val: str) -> list[str]:
     """Parse lost column: '' -> [], 'lean' -> ['lean'], 'lean,rich' -> ['lean','rich']."""
+    if val is None:
+        return []
     v = str(val).strip()
-    if not v:
+    if not v or v.lower() in ('nan', 'none', 'null', 'false'):
         return []
     return [x.strip() for x in v.split(',') if x.strip()]
 
@@ -357,12 +367,18 @@ def _row_to_call_kwargs(row: dict, D: int, T: int, gfl: float, gfh: float,
     else:
         lost = lost_list  # run_profile handles list in >=1.4.0
 
-    gfl_raw = str(row.get("gf_low", "")).strip()
-    gfh_raw = str(row.get("gf_high", "")).strip()
+    def _clean(v):
+        """Return stripped string, or '' if None/NaN/null."""
+        if v is None: return ''
+        s = str(v).strip()
+        return '' if s.lower() in ('nan', 'none', 'null', '') else s
+
+    gfl_raw = _clean(row.get("gf_low", ""))
+    gfh_raw = _clean(row.get("gf_high", ""))
     row_gfl = float(gfl_raw) / 100 if gfl_raw else gfl
     row_gfh = float(gfh_raw) / 100 if gfh_raw else gfh
 
-    ar_raw = str(row.get("ascent_rate", "")).strip().lower()
+    ar_raw = _clean(row.get("ascent_rate", "")).lower()
     if ar_raw == "fast":
         row_ar = _EMERGENCY_ASCENT_RATE
     elif ar_raw:
@@ -370,7 +386,7 @@ def _row_to_call_kwargs(row: dict, D: int, T: int, gfl: float, gfh: float,
     else:
         row_ar = base_ascent_rate
 
-    sac_raw = str(row.get("sac_override", "")).strip()
+    sac_raw = _clean(row.get("sac_override", ""))
     row_sac = float(sac_raw) if sac_raw else base_sac_bottom
 
     return dict(depth=depth, bottom_time=time, deco_gases_lost=lost,
