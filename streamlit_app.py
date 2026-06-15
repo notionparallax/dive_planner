@@ -562,7 +562,7 @@ with st.expander("✏️ Customise scenarios", expanded=False):
     _edited_df = st.data_editor(
         st.session_state["scenarios_df"],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         column_config={
             "enabled":       st.column_config.CheckboxColumn("✓", width="small"),
 "name":          st.column_config.TextColumn("Name", width="medium"),
