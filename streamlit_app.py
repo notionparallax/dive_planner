@@ -70,16 +70,16 @@ _SCENARIO_COLS = ["enabled", "name", "depth", "time",
 def _default_scenario_rows(lean_o2_pct: int, rich_o2_pct: int) -> list[dict]:
     """Return the default 10-scenario list as a list of dicts."""
     return [
-        dict(enabled=True,  in_auto_timer=True,  name="Main",            depth="+0", time="+0", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True,  in_auto_timer=True,  name="Longer",          depth="+0", time="+3", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True,  in_auto_timer=True,  name="Deeper",          depth="+3", time="+0", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True,  in_auto_timer=True,  name="D & L",           depth="+3", time="+3", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True,  in_auto_timer=True,  name=f"No {lean_o2_pct}%",    depth="+0", time="+0", lost="lean",      gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True,  in_auto_timer=True,  name=f"No {rich_o2_pct}%",    depth="+0", time="+0", lost="rich",      gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True,  in_auto_timer=True,  name=f"No {lean_o2_pct}% (D)",depth="+3", time="+3", lost="lean",      gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True,  in_auto_timer=True,  name=f"No {rich_o2_pct}% (D)",depth="+3", time="+3", lost="rich",      gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True,  in_auto_timer=False, name="Bounce",          depth="+0", time="10", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True,  in_auto_timer=False, name="Emergency",       depth="+0", time="+0", lost="",          gf_low="99", gf_high="99", ascent_rate="fast", sac_override=""),
+        dict(enabled=True, name="Main",                   depth="+0", time="+0", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True, name="Longer",                 depth="+0", time="+3", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True, name="Deeper",                 depth="+3", time="+0", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True, name="D & L",                  depth="+3", time="+3", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True, name=f"No {lean_o2_pct}%",     depth="+0", time="+0", lost="lean", gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True, name=f"No {rich_o2_pct}%",     depth="+0", time="+0", lost="rich", gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True, name=f"No {lean_o2_pct}% (D)", depth="+3", time="+3", lost="lean", gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True, name=f"No {rich_o2_pct}% (D)", depth="+3", time="+3", lost="rich", gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True, name="Bounce",                 depth="+0", time="10", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True, name="Emergency",              depth="+0", time="+0", lost="",     gf_low="99", gf_high="99", ascent_rate="fast", sac_override=""),
     ]
 
 
