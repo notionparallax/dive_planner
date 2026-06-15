@@ -890,7 +890,9 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         rich_gas=None, rich_switch=None,
                         min_reserve=10,
                         descent_stops=None,
-                        gas_switch_time=None):
+                        gas_switch_time=None,
+                        contingency_scenarios=None,
+                        travel_gas_config=None):
     """
     Find the maximum bottom time satisfying the gas rule.
 
@@ -901,6 +903,12 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
     back_gas_pressure: override fill pressure (default: BACK_GAS_PRESSURE)
     deco_50_pressure: override fill pressure for EAN50 (default: DECO_50_PRESSURE)
     deco_o2_pressure: override fill pressure for O2 (default: DECO_O2_PRESSURE)
+    contingency_scenarios: optional list of dicts, each with keys:
+        depth (int, absolute), time_offset (int, added to T), time_absolute (int or None),
+        lost (False/'lean'/'rich'/list), gf_low (float or None), gf_high (float or None),
+        ascent_rate (float or None), sac_bottom (float or None), sac_deco (float or None).
+        If provided, replaces the hardcoded 8-scenario set.
+    travel_gas_config: (o2, he, bar, vol, switch_depth) tuple or None.
     Uses binary search over bottom time.
     """
     _back_gas = back_gas if back_gas is not None else BACK_GAS
@@ -928,20 +936,34 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
         mid = (lo + hi) // 2
         try:
             if gas_rule == 'double_ascent':
-                # Check all contingency scenarios fit within cylinder capacity
-                # Worst cases: T+3 @ D+3 with lost lean or lost rich gas
-                scenarios = [
-                    (depth, mid, False),
-                    (depth, mid + 3, False),
-                    (depth + 3, mid, False),
-                    (depth + 3, mid + 3, False),
-                    (depth, mid, 'lean'),
-                    (depth, mid, 'rich'),
-                    (depth + 3, mid + 3, 'lean'),
-                    (depth + 3, mid + 3, 'rich'),
-                ]
+                if contingency_scenarios is not None:
+                    # Use caller-supplied scenario list
+                    _scenarios_to_check = [
+                        (s['depth'],
+                         s['time_absolute'] if s.get('time_absolute') is not None else mid + s.get('time_offset', 0),
+                         s.get('lost', False),
+                         s.get('gf_low') or _gf_low,
+                         s.get('gf_high') or _gf_high,
+                         s.get('ascent_rate') or _ascent_rate,
+                         s.get('sac_bottom') or _sac_bottom,
+                         s.get('sac_deco') or _sac_deco,
+                        )
+                        for s in contingency_scenarios
+                    ]
+                else:
+                    # Default hardcoded 8-scenario set
+                    _scenarios_to_check = [
+                        (depth,     mid,     False,  _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
+                        (depth,     mid + 3, False,  _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
+                        (depth + 3, mid,     False,  _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
+                        (depth + 3, mid + 3, False,  _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
+                        (depth,     mid,     'lean', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
+                        (depth,     mid,     'rich', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
+                        (depth + 3, mid + 3, 'lean', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
+                        (depth + 3, mid + 3, 'rich', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
+                    ]
                 ok = True
-                for d, bt, lost in scenarios:
+                for d, bt, lost, s_gfl, s_gfh, s_ar, s_sb, s_sd in _scenarios_to_check:
                     r = run_scenario("test", d, bt, deco_gases_lost=lost,
                                      back_gas=_back_gas,
                                      back_gas_pressure=_back_gas_pressure,
@@ -952,18 +974,20 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                      deco_o2_vol=_deco_o2_vol,
                                      lean_gas=_lean_gas, lean_switch=_lean_switch,
                                      rich_gas=_rich_gas, rich_switch=_rich_switch,
-                                     gf_low=_gf_low, gf_high=_gf_high,
-                                     descent_rate=_descent_rate, ascent_rate=_ascent_rate,
-                                     sac_bottom=_sac_bottom, sac_deco=_sac_deco,
+                                     gf_low=s_gfl, gf_high=s_gfh,
+                                     descent_rate=_descent_rate, ascent_rate=s_ar,
+                                     sac_bottom=s_sb, sac_deco=s_sd,
                                      descent_stops=descent_stops,
+                                     travel_gas_config=travel_gas_config,
                                      gas_switch_time=gas_switch_time)
                     if r['back_remaining_bar'] < min_reserve:
                         ok = False
                         break
-                    if lost not in (True, 'lean') and r['lean_remaining_bar'] < min_reserve:
+                    lost_list = lost if isinstance(lost, list) else []
+                    if lost not in (True, 'lean') and 'lean' not in lost_list and r['lean_remaining_bar'] < min_reserve:
                         ok = False
                         break
-                    if lost not in (True, 'rich') and r['rich_remaining_bar'] < min_reserve:
+                    if lost not in (True, 'rich') and 'rich' not in lost_list and r['rich_remaining_bar'] < min_reserve:
                         ok = False
                         break
             else:

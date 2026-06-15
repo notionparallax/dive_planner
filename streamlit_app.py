@@ -401,11 +401,43 @@ if _travel_mode:
              "tv_bar": travel_bar, "tv_vol": travel_vol})
 
 
+def _build_contingency_specs(rows, D: int, gfl: float, gfh: float, ar, sb: float, sd: float) -> list[dict]:
+    """Convert enabled scenario rows into contingency_scenarios dicts for find_max_bottom_time."""
+    ar_val = list(ar) if isinstance(ar, tuple) and ar and isinstance(ar[0], tuple) else ar
+    specs = []
+    for row in rows:
+        if row.get("enabled") is False:
+            continue
+        raw_time = str(row.get("time", "")).strip()
+        if raw_time and not raw_time.lower().startswith(('nan', 'none', 'null')):
+            is_relative = raw_time.startswith('+') or raw_time.startswith('-')
+            time_val = int(float(raw_time))
+            time_offset = time_val if is_relative else None
+            time_absolute = None if is_relative else time_val
+        else:
+            time_offset, time_absolute = 0, None
+
+        kw = _row_to_call_kwargs(row, D, 0, gfl, gfh, ar_val, sb, sd)
+        specs.append({
+            'depth': kw['depth'],
+            'time_offset': time_offset if time_offset is not None else 0,
+            'time_absolute': time_absolute,
+            'lost': kw['deco_gases_lost'],
+            'gf_low': kw['gf_low'],
+            'gf_high': kw['gf_high'],
+            'ascent_rate': kw['ascent_rate'] if kw['ascent_rate'] != ar_val else None,
+            'sac_bottom': kw['sac_bottom'] if kw['sac_bottom'] != sb else None,
+            'sac_deco': kw['sac_deco'] if kw['sac_deco'] != sd else None,
+        })
+    return specs
+
+
 # ─── Compute ──────────────────────────────────────────────────────────────────
 @st.cache_data
 def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd,
                   lean_gas, lean_switch, rich_gas, rich_switch, min_reserve=10,
-                  descent_stops=None, gas_switch_time=None):
+                  descent_stops=None, gas_switch_time=None,
+                  contingency_scenarios=None, travel_gas_config=None):
     return find_max_bottom_time(
         depth, back_gas,
         back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
@@ -417,57 +449,10 @@ def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, d
         min_reserve=min_reserve,
         descent_stops=descent_stops,
         gas_switch_time=gas_switch_time,
+        contingency_scenarios=list(contingency_scenarios) if contingency_scenarios else None,
+        travel_gas_config=travel_gas_config,
     )
 
-
-@st.cache_data
-def _get_max_time_custom(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd,
-                         lean_gas, lean_switch, rich_gas, rich_switch, min_reserve=10,
-                         descent_stops=None, gas_switch_time=None, travel_gas_config=None,
-                         scenario_rows=None):
-    """Binary search for max bottom time constrained by all custom scenario rows."""
-    dst = list(descent_stops) if descent_stops else None
-    ar_val = list(ar) if isinstance(ar, tuple) and ar and isinstance(ar[0], tuple) else ar
-    rows = [dict(r) for r in scenario_rows] if scenario_rows else []
-    rows = [r for r in rows if r.get("enabled") is not False]
-
-    lo, hi, best = 1, 120, 1
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        ok = True
-        try:
-            for row in rows:
-                kw = _row_to_call_kwargs(row, depth, mid, gfl, gfh, ar_val, sb, sd)
-                r = run_scenario(
-                    "test", kw["depth"], kw["bottom_time"],
-                    deco_gases_lost=kw["deco_gases_lost"],
-                    back_gas=back_gas,
-                    back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
-                    back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
-                    gf_low=kw["gf_low"], gf_high=kw["gf_high"],
-                    descent_rate=dr, ascent_rate=kw["ascent_rate"],
-                    sac_bottom=kw["sac_bottom"], sac_deco=kw["sac_deco"],
-                    lean_gas=lean_gas, lean_switch=lean_switch,
-                    rich_gas=rich_gas, rich_switch=rich_switch,
-                    descent_stops=dst,
-                    travel_gas_config=travel_gas_config,
-                    gas_switch_time=gas_switch_time,
-                )
-                lost = kw["deco_gases_lost"]
-                if r["back_remaining_bar"] < min_reserve:
-                    ok = False; break
-                if lost not in (True, "lean") and not isinstance(lost, list) and r["lean_remaining_bar"] < min_reserve:
-                    ok = False; break
-                if lost not in (True, "rich") and not isinstance(lost, list) and r["rich_remaining_bar"] < min_reserve:
-                    ok = False; break
-        except Exception:
-            ok = False
-        if ok:
-            best = mid
-            lo = mid + 1
-        else:
-            hi = mid - 1
-    return best
 
 
 _EMERGENCY_ASCENT_RATE = 18  # m/min — fast but survivable
@@ -561,28 +546,22 @@ _scenario_rows_cache = _df_to_scenario_rows_tuple(st.session_state["scenarios_df
 with st.spinner("Computing…"):
     _tv_config = (travel_o2, travel_he, travel_bar, travel_vol, h2_switch) if _travel_mode else None
     if auto_time:
-        if _scenario_rows_cache:
-            T = _get_max_time_custom(
-                depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
-                back_gas_vol, deco_50_vol, deco_o2_vol,
-                gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
-                (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
-                min_gas_reserve,
-                descent_stops=descent_stops_tuple,
-                gas_switch_time=gs_time,
-                travel_gas_config=_tv_config,
-                scenario_rows=_scenario_rows_cache,
-            )
-        else:
-            T = _get_max_time(
-                depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
-                back_gas_vol, deco_50_vol, deco_o2_vol,
-                gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
-                (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
-                min_gas_reserve,
-                descent_stops=descent_stops_tuple,
-                gas_switch_time=gs_time,
-            )
+        _scen_rows_list = [dict(r) for r in _scenario_rows_cache] if _scenario_rows_cache else []
+        _contingency_specs = tuple(
+            tuple(sorted(s.items())) for s in
+            _build_contingency_specs(_scen_rows_list, depth, gf_low, gf_high, _ar_cache, sac_bottom, sac_deco)
+        ) if _scen_rows_list else None
+        T = _get_max_time(
+            depth, back_gas, back_gas_pressure, deco_50_pressure, deco_o2_pressure,
+            back_gas_vol, deco_50_vol, deco_o2_vol,
+            gf_low, gf_high, descent_rate, _ar_cache, sac_bottom, sac_deco,
+            (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
+            min_gas_reserve,
+            descent_stops=descent_stops_tuple,
+            gas_switch_time=gs_time,
+            contingency_scenarios=_contingency_specs,
+            travel_gas_config=_tv_config,
+        )
     else:
         T = manual_bt_val
     results, scenario_defs = _compute_scenarios(
