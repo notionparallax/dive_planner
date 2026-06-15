@@ -63,7 +63,7 @@ def _qpb(key, default):
 
 
 # ─── Scenario definitions ─────────────────────────────────────────────────────
-_SCENARIO_COLS = ["enabled", "in_auto_timer", "name", "depth", "time",
+_SCENARIO_COLS = ["enabled", "name", "depth", "time",
                   "lost", "gf_low", "gf_high", "ascent_rate", "sac_override"]
 
 
@@ -443,8 +443,6 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
         kw = _row_to_call_kwargs(row, D, T, gfl, gfh, ar_val, sb, sd)
         tag = row["name"]
         d, bt, lost = kw["depth"], kw["bottom_time"], kw["deco_gases_lost"]
-        in_auto = row.get("in_auto_timer") is not False  # None/null defaults to True
-
         # Use per-row ascent rate (already resolved to numeric/list by _row_to_call_kwargs)
         row_ar = kw["ascent_rate"]
 
@@ -485,7 +483,6 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
             }
         r["leave_time"] = bt
         r["tag"] = tag
-        r["in_auto_timer"] = in_auto
         results.append(r)
         scenario_defs.append((d, bt, lost, tag))
 
@@ -596,10 +593,10 @@ for i, r in enumerate(results):
     for w in r.get("icd_warnings", []):
         _icd_warnings_seen.add(w)
 
-# Constraining scenario: only scenarios marked in_auto_timer and not infeasible
+# Constraining scenario: all enabled (non-infeasible) results
 _constraint_scenarios_idx = [
     i for i, r in enumerate(results)
-    if r.get("in_auto_timer", True) and not r.get("infeasible", False)
+    if not r.get("infeasible", False)
 ]
 def _gas_margin(r):
     lost = r.get("deco_gases_lost", False)
@@ -659,9 +656,7 @@ with st.expander("✏️ Customise scenarios", expanded=False):
         use_container_width=True,
         column_config={
             "enabled":       st.column_config.CheckboxColumn("✓", width="small"),
-            "in_auto_timer": st.column_config.CheckboxColumn("Auto timer", width="small",
-                                help="Include in max bottom time search"),
-            "name":          st.column_config.TextColumn("Name", width="medium"),
+"name":          st.column_config.TextColumn("Name", width="medium"),
             "depth":         st.column_config.TextColumn("Depth", width="small",
                                 help="+3 = D+3m, 45 = absolute 45m, blank = D"),
             "time":          st.column_config.TextColumn("Time", width="small",
