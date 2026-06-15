@@ -1,7 +1,9 @@
 """Dive planner web interface."""
+import base64
 import io
 import importlib.metadata
 import csv as _csv
+import json
 import os
 import sys
 
@@ -302,69 +304,184 @@ def _get_max_time(depth, back_gas, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, d
 
 _EMERGENCY_ASCENT_RATE = 18  # m/min — fast but survivable
 
+# ─── Scenario definitions ─────────────────────────────────────────────────────
+_SCENARIO_COLS = ["enabled", "in_auto_timer", "name", "depth", "time",
+                  "lost", "gf_low", "gf_high", "ascent_rate", "sac_override"]
+
+
+def _default_scenario_rows(lean_o2_pct: int, rich_o2_pct: int) -> list[dict]:
+    """Return the default 10-scenario list as a list of dicts."""
+    return [
+        dict(enabled=True,  in_auto_timer=True,  name="Main",            depth="+0", time="+0", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True,  in_auto_timer=True,  name="Longer",          depth="+0", time="+3", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True,  in_auto_timer=True,  name="Deeper",          depth="+3", time="+0", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True,  in_auto_timer=True,  name="D & L",           depth="+3", time="+3", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True,  in_auto_timer=True,  name=f"No {lean_o2_pct}%",    depth="+0", time="+0", lost="lean",      gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True,  in_auto_timer=True,  name=f"No {rich_o2_pct}%",    depth="+0", time="+0", lost="rich",      gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True,  in_auto_timer=True,  name=f"No {lean_o2_pct}% (D)",depth="+3", time="+3", lost="lean",      gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True,  in_auto_timer=True,  name=f"No {rich_o2_pct}% (D)",depth="+3", time="+3", lost="rich",      gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True,  in_auto_timer=False, name="Bounce",          depth="+0", time="10", lost="",          gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
+        dict(enabled=True,  in_auto_timer=False, name="Emergency",       depth="+0", time="+0", lost="",          gf_low="99", gf_high="99", ascent_rate="fast", sac_override=""),
+    ]
+
+
+def _parse_dim(val: str, base: int) -> int:
+    """Parse a depth/time cell: '+3' -> base+3, '45' -> 45. Empty -> base."""
+    v = str(val).strip()
+    if not v:
+        return base
+    if v.startswith('+') or v.startswith('-'):
+        return base + int(v)
+    return int(v)
+
+
+def _resolve_lost(val: str) -> list[str]:
+    """Parse lost column: '' -> [], 'lean' -> ['lean'], 'lean,rich' -> ['lean','rich']."""
+    v = str(val).strip()
+    if not v:
+        return []
+    return [x.strip() for x in v.split(',') if x.strip()]
+
+
+def _row_to_call_kwargs(row: dict, D: int, T: int, gfl: float, gfh: float,
+                        base_ascent_rate, base_sac_bottom: float, base_sac_deco: float) -> dict:
+    """Convert a scenario row dict to kwargs ready to pass to run_scenario."""
+    depth = _parse_dim(row["depth"], D)
+    time  = _parse_dim(row["time"],  T)
+    lost_list = _resolve_lost(row.get("lost", ""))
+    # deco_gases_lost: False, 'lean', 'rich', or ['lean','rich']
+    if not lost_list:
+        lost = False
+    elif len(lost_list) == 1:
+        lost = lost_list[0]
+    else:
+        lost = lost_list  # run_profile handles list in >=1.4.0
+
+    gfl_raw = str(row.get("gf_low", "")).strip()
+    gfh_raw = str(row.get("gf_high", "")).strip()
+    row_gfl = float(gfl_raw) / 100 if gfl_raw else gfl
+    row_gfh = float(gfh_raw) / 100 if gfh_raw else gfh
+
+    ar_raw = str(row.get("ascent_rate", "")).strip().lower()
+    if ar_raw == "fast":
+        row_ar = _EMERGENCY_ASCENT_RATE
+    elif ar_raw:
+        row_ar = float(ar_raw)
+    else:
+        row_ar = base_ascent_rate
+
+    sac_raw = str(row.get("sac_override", "")).strip()
+    row_sac = float(sac_raw) if sac_raw else base_sac_bottom
+
+    return dict(depth=depth, bottom_time=time, deco_gases_lost=lost,
+                gf_low=row_gfl, gf_high=row_gfh,
+                ascent_rate=row_ar, sac_bottom=row_sac, sac_deco=base_sac_deco)
+
+
+def _scenarios_to_b64(df) -> str:
+    return base64.urlsafe_b64encode(
+        json.dumps(df.to_dict(orient='records')).encode()
+    ).decode()
+
+
+def _b64_to_scenarios_df(s: str, lean_o2_pct: int, rich_o2_pct: int):
+    try:
+        rows = json.loads(base64.urlsafe_b64decode(s.encode()).decode())
+        import pandas as pd
+        return pd.DataFrame(rows)[_SCENARIO_COLS]
+    except Exception:
+        import pandas as pd
+        return pd.DataFrame(_default_scenario_rows(lean_o2_pct, rich_o2_pct))
+
 
 @st.cache_data
 def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl, gfh, dr, ar, sb, sd, dst,
-                       lean_gas, lean_switch, rich_gas, rich_switch, travel_gas_config=None, gas_switch_time=1.0):
+                       lean_gas, lean_switch, rich_gas, rich_switch, travel_gas_config=None, gas_switch_time=1.0,
+                       scenario_rows=None):
+    """Run all enabled scenarios. scenario_rows is a tuple-of-dicts (hashable) from the editor."""
     D = depth
     descent_stops = list(dst) if dst else None
-    # ar may be a float or a tuple of (max_depth, rate) pairs
     ar_val = list(ar) if isinstance(ar, tuple) and ar and isinstance(ar[0], tuple) else ar
-    scenario_defs = [
-        (D,     T,      False,    "Main"),
-        (D,     T + 3,  False,    "Longer"),
-        (D + 3, T,      False,    "Deeper"),
-        (D + 3, T + 3,  False,    "D & L"),
-        (D,     T,      "lean",   f"no {lean_gas[0]}%"),
-        (D,     T,      "rich",   f"no {rich_gas[0]}%"),
-        (D + 3, T + 3,  "lean",   f"no {lean_gas[0]}% (D)"),
-        (D + 3, T + 3,  "rich",   f"no {rich_gas[0]}% (D)"),
-        (D,     10,     False,    "Bounce"),
-    ]
+
+    if scenario_rows:
+        rows = [dict(r) for r in scenario_rows]  # each r is a tuple of (k,v) pairs
+    else:
+        rows = _default_scenario_rows(lean_gas[0], rich_gas[0])
+    rows = [r for r in rows if r.get("enabled", True)]
+
     results = []
-    for d, bt, lost, tag in scenario_defs:
-        r = run_scenario(
-            tag, d, bt, deco_gases_lost=lost,
-            back_gas=back_gas,
-            back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
-            back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
-            gf_low=gfl, gf_high=gfh,
-            descent_rate=dr, ascent_rate=ar_val,
-            sac_bottom=sb, sac_deco=sd,
-            lean_gas=lean_gas, lean_switch=lean_switch,
-            rich_gas=rich_gas, rich_switch=rich_switch,
-            descent_stops=descent_stops,
-            travel_gas_config=travel_gas_config,
-            gas_switch_time=gas_switch_time,
-        )
+    scenario_defs = []  # kept for backward compat with auto-timer logic
+    for row in rows:
+        kw = _row_to_call_kwargs(row, D, T, gfl, gfh, ar_val, sb, sd)
+        tag = row["name"]
+        d, bt, lost = kw["depth"], kw["bottom_time"], kw["deco_gases_lost"]
+        in_auto = bool(row.get("in_auto_timer", True))
+
+        # Use per-row ascent rate (already resolved to numeric/list by _row_to_call_kwargs)
+        row_ar = kw["ascent_rate"]
+
+        try:
+            r = run_scenario(
+                tag, d, bt, deco_gases_lost=lost,
+                back_gas=back_gas,
+                back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
+                back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
+                gf_low=kw["gf_low"], gf_high=kw["gf_high"],
+                descent_rate=dr, ascent_rate=row_ar,
+                sac_bottom=kw["sac_bottom"], sac_deco=kw["sac_deco"],
+                lean_gas=lean_gas, lean_switch=lean_switch,
+                rich_gas=rich_gas, rich_switch=rich_switch,
+                descent_stops=descent_stops,
+                travel_gas_config=travel_gas_config,
+                gas_switch_time=gas_switch_time,
+            )
+            r["infeasible"] = False
+            r["infeasible_reason"] = ""
+        except Exception as exc:
+            # Build a stub result so the table column still exists
+            r = {
+                "name": tag, "depth": d, "bottom_time": bt, "total_time": 0,
+                "total_deco": 0, "deco_stops": [], "times": [], "depths": [],
+                "deco_gases_lost": lost, "stop_runtimes": {},
+                "otu": 0, "cns": 0, "gas_used": {},
+                "back_remaining_bar": 0, "lean_remaining_bar": 0,
+                "rich_remaining_bar": 0, "travel_remaining_bar": None,
+                "lean_gas": lean_gas, "rich_gas": rich_gas,
+                "lean_switch": lean_switch, "rich_switch": rich_switch,
+                "min_gas": {"bar_at_turn": 0, "turn_pressure_bar": 0,
+                            "can_start_before_140": False, "has_enough_gas": False,
+                            "min_gas_litres": 0, "bar_used_bottom": 0},
+                "max_gas_density": 0, "icd_warnings": [],
+                "ceiling_profile": [], "gas_pressure_profile": {},
+                "infeasible": True, "infeasible_reason": str(exc),
+            }
         r["leave_time"] = bt
         r["tag"] = tag
+        r["in_auto_timer"] = in_auto
         results.append(r)
-
-    # Emergency scenario: GF 99/99, fast ascent, main depth/time
-    emerg = run_scenario(
-        "Emergency\n(GF99/99)", D, T, deco_gases_lost=False,
-        back_gas=back_gas,
-        back_gas_pressure=bgp, deco_50_pressure=d50p, deco_o2_pressure=do2p,
-        back_gas_vol=bgv, deco_50_vol=d50v, deco_o2_vol=do2v,
-        gf_low=0.99, gf_high=0.99,
-        descent_rate=dr, ascent_rate=_EMERGENCY_ASCENT_RATE,
-        sac_bottom=sb, sac_deco=sd,
-        lean_gas=lean_gas, lean_switch=lean_switch,
-        rich_gas=rich_gas, rich_switch=rich_switch,
-        descent_stops=descent_stops,
-        travel_gas_config=travel_gas_config,
-        gas_switch_time=gas_switch_time,
-    )
-    emerg["leave_time"] = T
-    emerg["tag"] = "Emergency\n(GF99/99)"
-    results.append(emerg)
+        scenario_defs.append((d, bt, lost, tag))
 
     return results, scenario_defs
 
 
+# ─── Scenario editor state ───────────────────────────────────────────────────
+_scen_b64 = _qp.get("scenarios", "")
+if "scenarios_df" not in st.session_state:
+    if _scen_b64:
+        st.session_state["scenarios_df"] = _b64_to_scenarios_df(_scen_b64, lean_o2, rich_o2)
+    else:
+        st.session_state["scenarios_df"] = pd.DataFrame(
+            _default_scenario_rows(lean_o2, rich_o2)
+        )
+
 # Convert profile to tuple for cache hashing
 _ar_cache = tuple(ascent_rate_profile) if isinstance(ascent_rate_profile, list) else ascent_rate_profile
+
+# Convert scenarios df to a hashable tuple-of-frozensets for cache key
+def _df_to_scenario_rows_tuple(df) -> tuple:
+    return tuple(tuple(sorted(row.items())) for row in df.to_dict(orient='records'))
+
+_scenario_rows_cache = _df_to_scenario_rows_tuple(st.session_state["scenarios_df"])
 
 with st.spinner("Computing…"):
     _tv_config = (travel_o2, travel_he, travel_bar, travel_vol, h2_switch) if _travel_mode else None
@@ -387,6 +504,7 @@ with st.spinner("Computing…"):
         (lean_o2, lean_he), lean_switch, (rich_o2, rich_he), rich_switch,
         travel_gas_config=_tv_config,
         gas_switch_time=gs_time,
+        scenario_rows=_scenario_rows_cache,
     )
 
 if _h2_mode:
@@ -450,18 +568,24 @@ for i, r in enumerate(results):
     for w in r.get("icd_warnings", []):
         _icd_warnings_seen.add(w)
 
-# Constraining scenario: first 8 results match the auto-timer contingency scenarios
-_constraint_scenarios = results[:8]
+# Constraining scenario: only scenarios marked in_auto_timer and not infeasible
+_constraint_scenarios_idx = [
+    i for i, r in enumerate(results)
+    if r.get("in_auto_timer", True) and not r.get("infeasible", False)
+]
 def _gas_margin(r):
     lost = r.get("deco_gases_lost", False)
     margins = [r["back_remaining_bar"]]
-    if lost not in (True, "lean"):
+    if lost not in (True, "lean") and not isinstance(lost, list):
         margins.append(r["lean_remaining_bar"])
-    if lost not in (True, "rich"):
+    if lost not in (True, "rich") and not isinstance(lost, list):
         margins.append(r["rich_remaining_bar"])
     return min(margins)
 
-_constraint_idx = min(range(len(_constraint_scenarios)), key=lambda i: _gas_margin(_constraint_scenarios[i]))
+_constraint_idx = (
+    min(_constraint_scenarios_idx, key=lambda i: _gas_margin(results[i]))
+    if _constraint_scenarios_idx else -1
+)
 
 all_warnings = [w for ws in _col_warnings for w in ws]
 if _icd_warnings_seen:
@@ -482,11 +606,69 @@ if all_warnings:
 # Build column labels with warning emoji and constraining scenario marker
 col_labels = []
 for i, r in enumerate(results):
-    prefix = "🖐️ " if i == _constraint_idx else ("⚠️ " if _col_warnings[i] else "")
+    if r.get("infeasible"):
+        prefix = "🚫 "
+    elif i == _constraint_idx:
+        prefix = "🖐️ "
+    elif _col_warnings[i]:
+        prefix = "⚠️ "
+    else:
+        prefix = ""
     col_labels.append(f"{prefix}{r['leave_time']}'\n{r['depth']}m\n{r['tag']}")
 
-# ─── Planning table ───────────────────────────────────────────────────────────
+# ─── Scenario editor ──────────────────────────────────────────────────────────
 st.subheader("Planning Table")
+with st.expander("✏️ Customise scenarios", expanded=False):
+    st.caption(
+        "depth/time: `+3` = D+3 or T+3 (relative), `45` = absolute. "
+        "lost: blank, `lean`, `rich`, `lean,rich`. "
+        "ascent_rate: blank = normal, `fast` = emergency, or a number (m/min). "
+        "gf_low/gf_high: blank = use sidebar GF. sac_override: blank = use sidebar SAC."
+    )
+    _edited_df = st.data_editor(
+        st.session_state["scenarios_df"],
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "enabled":       st.column_config.CheckboxColumn("✓", width="small"),
+            "in_auto_timer": st.column_config.CheckboxColumn("Auto timer", width="small",
+                                help="Include in max bottom time search"),
+            "name":          st.column_config.TextColumn("Name", width="medium"),
+            "depth":         st.column_config.TextColumn("Depth", width="small",
+                                help="+3 = D+3m, 45 = absolute 45m, blank = D"),
+            "time":          st.column_config.TextColumn("Time", width="small",
+                                help="+3 = T+3min, 10 = absolute 10min, blank = T"),
+            "lost":          st.column_config.TextColumn("Lost gas", width="small",
+                                help="blank, lean, rich, or lean,rich"),
+            "gf_low":        st.column_config.TextColumn("GF low", width="small",
+                                help="1–100, blank = sidebar value"),
+            "gf_high":       st.column_config.TextColumn("GF high", width="small",
+                                help="1–100, blank = sidebar value"),
+            "ascent_rate":   st.column_config.TextColumn("Ascent rate", width="small",
+                                help="blank = normal, fast = emergency, or m/min number"),
+            "sac_override":  st.column_config.TextColumn("SAC", width="small",
+                                help="L/min override, blank = sidebar SAC"),
+        },
+        hide_index=True,
+        key="scenario_editor",
+    )
+    _c1, _c2, _c3 = st.columns([1, 1, 4])
+    if _c1.button("Apply", type="primary"):
+        st.session_state["scenarios_df"] = _edited_df
+        _qp_set({"scenarios": _scenarios_to_b64(_edited_df)})
+        st.rerun()
+    if _c2.button("Reset to defaults"):
+        st.session_state["scenarios_df"] = pd.DataFrame(
+            _default_scenario_rows(lean_o2, rich_o2)
+        )
+        _qp_set({"scenarios": ""})
+        st.rerun()
+    # Show infeasible reasons if any
+    _infeasible_results = [r for r in results if r.get("infeasible")]
+    if _infeasible_results:
+        st.error("**🚫 Infeasible scenarios** — these could not be computed:")
+        for r in _infeasible_results:
+            st.markdown(f"- **{r['tag']}**: {r['infeasible_reason']}")
 
 
 # Determine all deco stop depths across all scenarios
@@ -666,8 +848,10 @@ fig = make_subplots(
 
 # ── Depth profile traces ──────────────────────────────────────────────────────
 for i, r in enumerate(results):
+    if r.get("infeasible"):
+        continue
     is_sel = r["tag"] == selected_tag
-    color = COLORS[i]
+    color = COLORS[i % len(COLORS)]
     fig.add_trace(
         go.Scatter(
             x=r["times"],
