@@ -435,7 +435,7 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
         rows = [dict(r) for r in scenario_rows]  # each r is a tuple of (k,v) pairs
     else:
         rows = _default_scenario_rows(lean_gas[0], rich_gas[0])
-    rows = [r for r in rows if r.get("enabled", True)]
+    rows = [r for r in rows if r.get("enabled") is not False]  # None/null defaults to enabled
 
     results = []
     scenario_defs = []  # kept for backward compat with auto-timer logic
@@ -443,7 +443,7 @@ def _compute_scenarios(back_gas, depth, T, bgp, d50p, do2p, bgv, d50v, do2v, gfl
         kw = _row_to_call_kwargs(row, D, T, gfl, gfh, ar_val, sb, sd)
         tag = row["name"]
         d, bt, lost = kw["depth"], kw["bottom_time"], kw["deco_gases_lost"]
-        in_auto = bool(row.get("in_auto_timer", True))
+        in_auto = row.get("in_auto_timer") is not False  # None/null defaults to True
 
         # Use per-row ascent rate (already resolved to numeric/list by _row_to_call_kwargs)
         row_ar = kw["ascent_rate"]
