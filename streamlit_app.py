@@ -197,8 +197,19 @@ with st.sidebar:
     # Read o2_narcotic early so Best Mix Calculator can use it; checkbox defined in Settings below.
     o2_narcotic = _qpb("o2_narc", False)
     with st.expander("🧪 Best Mix Calculator", expanded=False):
-        _bm_depth = depth + 3  # deepest contingency
-        st.caption(f"Calculated for {_bm_depth}m (deepest contingency = planned {depth}m + 3m) — safe at worst case")
+        # Deepest contingency: scan enabled scenario rows for the worst-case depth.
+        # We can't use `results` here (sidebar runs before compute), so parse the df directly.
+        _scen_rows_bm = st.session_state.get("scenarios_df")
+        if _scen_rows_bm is not None:
+            _enabled_rows = _scen_rows_bm[_scen_rows_bm["enabled"].astype(bool)]
+            _candidate_depths = [_parse_dim(str(r["depth"]), depth) for _, r in _enabled_rows.iterrows()]
+            _bm_depth = max(_candidate_depths) if _candidate_depths else depth + 3
+        else:
+            _bm_depth = depth + 3
+        if _bm_depth == depth:
+            st.caption(f"Calculated for {_bm_depth}m (no deeper contingency scenario enabled)")
+        else:
+            st.caption(f"Calculated for {_bm_depth}m (deepest enabled scenario) — safe at worst case")
         bm_end = st.number_input(
             "Target END (m)", min_value=10, max_value=40, value=30, step=1,
             help="Equivalent Narcotic Depth. GUE standard is 30m. Set lower for a more conservative mix.",
