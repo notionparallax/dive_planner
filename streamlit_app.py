@@ -72,7 +72,7 @@ with st.sidebar:
     st.title("🤿 Dive Planner")
 
     st.subheader("Depth & Time")
-    depth = int(st.number_input("Depth (m)", min_value=10, max_value=80, value=_qpi("depth", 48), step=1))
+    depth = int(st.number_input("Depth (m)", min_value=10, max_value=200, value=_qpi("depth", 48), step=1))
     auto_time = st.checkbox("Auto bottom time", value=_qpb("auto_time", True),
                             help="Find max bottom time where all contingency scenarios (deeper, longer, lost deco gas) have gas remaining")
     manual_bt_val = None

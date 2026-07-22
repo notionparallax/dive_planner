@@ -1045,6 +1045,7 @@ def generate_planning_table(depth, back_gas=None, bottom_time=None,
     Prints the table and minimum fills.
     """
     _back_gas = back_gas if back_gas is not None else BACK_GAS
+    _back_h2 = _back_gas[2] if len(_back_gas) > 2 else 0
     _back_gas_pressure = back_gas_pressure if back_gas_pressure is not None else BACK_GAS_PRESSURE
     _deco_50_pressure = deco_50_pressure if deco_50_pressure is not None else DECO_50_PRESSURE
     _deco_o2_pressure = deco_o2_pressure if deco_o2_pressure is not None else DECO_O2_PRESSURE
@@ -1177,7 +1178,7 @@ def generate_planning_table(depth, back_gas=None, bottom_time=None,
     rows.append(["---"] + ["---"] * len(results))
     rows.append(["OTU"] + [f"{r['otu']:.0f}" for r in results])
     rows.append(["CNS %"] + [f"{r['cns']:.0f}%" for r in results])
-    rows.append(["END"] + [f"{(r['depth']+10)*(1-_back_gas[1]/100)-10:.0f}m" for r in results])
+    rows.append(["END"] + [f"{(r['depth']+10)*(1-(_back_gas[1]+_back_h2)/100)-10:.0f}m" for r in results])
     rows.append(["PO2"] + [f"{(SURFACE_PRESSURE + r['depth']/10)*(_back_gas[0]/100):.2f}" for r in results])
     rows.append(["Gas density g/L"] + [f"{_gas_density_gl(_back_gas[0], _back_gas[1], r['depth']):.2f}" for r in results])
     rows.append(["---"] + ["---"] * len(results))
@@ -1299,7 +1300,7 @@ def generate_planning_table(depth, back_gas=None, bottom_time=None,
         csv_rows.append([])
         csv_rows.append(["OTU"] + [f"{r['otu']:.0f}" for r in results])
         csv_rows.append(["CNS %"] + [f"{r['cns']:.0f}%" for r in results])
-        csv_rows.append(["END"] + [f"{(r['depth']+10)*(1-_back_gas[1]/100)-10:.0f}m" for r in results])
+        csv_rows.append(["END"] + [f"{(r['depth']+10)*(1-(_back_gas[1]+_back_h2)/100)-10:.0f}m" for r in results])
         csv_rows.append(["PO2"] + [f"{(SURFACE_PRESSURE + r['depth']/10)*(_back_gas[0]/100):.2f}" for r in results])
         csv_rows.append(["Gas density g/L"] + [f"{_gas_density_gl(_back_gas[0], _back_gas[1], r['depth']):.2f}" for r in results])
         csv_rows.append([])
