@@ -10,7 +10,7 @@ A technical dive planning web app built on [DecoTengu](https://github.com/notion
 
 Given a target depth and gas configuration, the planner runs **10 scenarios** simultaneously — the main plan plus contingencies (deeper, longer, lost deco gas, emergency) — and finds the maximum bottom time where **all** contingency scenarios finish with gas remaining. The result is a planning table used to brief the dive.
 
-It follows GUE/WKPP-style open-circuit trimix planning conventions, though most parameters are adjustable.
+It follows common open-circuit trimix planning conventions, though most parameters are adjustable.
 
 ---
 
@@ -79,7 +79,7 @@ An editable table with rows for Back gas, Lean deco gas, and Rich deco gas (plus
 
 ### Deco model
 
-- **GF low / GF high**: gradient factors as percentages. GUE uses 30/85; more conservative divers use 20/70.
+- **GF low / GF high**: gradient factors as percentages. Common choices range from 20/70 (more conservative) to 30/85 (less conservative).
 
 ### Rates
 
@@ -99,10 +99,11 @@ Adds a pause during descent (depth and duration configurable), included in gas c
 ### ⚙️ Settings
 
 - **ppO2 limits**: warning thresholds for bottom and contingency scenarios
-- **Gas density limit**: warn threshold in g/L (GUE limit 6.2 g/L)
+- **Gas density limit**: warn threshold in g/L (6.2 g/L is a common limit)
 - **CNS warn threshold**: default 80%
 - **Minimum gas reserve**: minimum bar any cylinder may reach (default 10 bar)
-- **O₂ is narcotic**: changes the END calculation. Default off (GUE: only N2 narcotic). When on, O2 also contributes to narcosis (PADI/NOAA model).
+- **O₂ is narcotic**: changes the END calculation. Default off (only N2 counted as narcotic). When on, O2 also contributes to narcosis.
+- **Units**: Metric (m) or Imperial (ft) display — internal calculation always stays metric. Default metric.
 
 ---
 
@@ -110,7 +111,7 @@ Adds a pause during descent (depth and duration configurable), included in gas c
 
 | Model | Formula | Example Tx22/27 at 51m |
 |---|---|---|
-| O₂ non-narcotic (GUE, default) | `(depth+10) × (fN2 / 0.79) − 10` | ~29m |
+| O₂ non-narcotic (default) | `(depth+10) × (fN2 / 0.79) − 10` | ~29m |
 | O₂ narcotic (PADI/NOAA) | `(depth+10) × (1 − fHe) − 10` | ~35m |
 
 ---
@@ -127,7 +128,7 @@ Every setting is encoded in the URL, making dive plans fully shareable. Key para
 
 | Param | Meaning | Default |
 |---|---|---|
-| `depth` | Target depth (m) | 48 |
+| `depth` | Target depth (m) | 40 |
 | `auto_time` | Auto bottom time on/off | 1 |
 | `o2`, `he` | Back gas mix | 21, 0 |
 | `bgp`, `bgv` | Back gas pressure (bar) and volume (L) | 230, 24.4 |

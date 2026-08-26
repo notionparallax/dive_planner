@@ -469,7 +469,7 @@ def calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4, o2_narcotic=Fal
     """
     Calculate the optimal trimix for a given depth.
 
-    When o2_narcotic=False (default, GUE/IANTD model):
+    When o2_narcotic=False (default):
         END = (depth + 10) × N2_frac - 10  (only N2 is narcotic)
     When o2_narcotic=True (NOAA/some agency model):
         END = (depth + 10) × (1 - He_frac) - 10  (O2 + N2 both narcotic)

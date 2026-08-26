@@ -2,7 +2,7 @@
 
 ## Safety & Validation
 
-- **Gas density warning** ✅ — Warn if gas density exceeds ~6.2 g/L (GUE/WKPP limit). Already tracked per-scenario; just needs a UI callout.
+- **Gas density warning** ✅ — Warn if gas density exceeds ~6.2 g/L (a common limit). Already tracked per-scenario; just needs a UI callout.
 - **CNS%/OTU flag** ✅ — Warn if CNS ≥ 80% in any scenario (the single-dive limit).
 - **Back gas ppO2 warning** ✅ — Warn if back gas ppO2 exceeds limit at depth (e.g. 32% O2 at 45m = 1.54 bar, close to or over the 1.4 bar bottom limit).
 

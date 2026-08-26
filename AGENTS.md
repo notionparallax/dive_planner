@@ -76,7 +76,7 @@ The function returns an integer (whole minutes) — auto bottom time always snap
 
 #### `calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4, o2_narcotic=False) → dict`
 
-Computes optimal trimix for a target END. `o2_narcotic=False` uses the GUE model (only N2 narcotic); `True` uses PADI/NOAA model (O2+N2 narcotic).
+Computes optimal trimix for a target END. `o2_narcotic=False` (default) treats only N2 as narcotic; `True` treats O2+N2 as narcotic.
 
 #### `_gas_density_gl(o2_pct, he_pct, depth_m, h2_pct=0) → float`
 
@@ -121,7 +121,7 @@ Full list:
 
 | Param | Type | Default | Meaning |
 |---|---|---|---|
-| `depth` | int | 48 | Target depth (m) |
+| `depth` | int | 40 | Target depth (m) |
 | `auto_time` | bool | 1 | Auto bottom time |
 | `manual_bt` | int | 31 | Manual bottom time |
 | `o2` | int | 21 | Back gas O2% |
@@ -174,7 +174,7 @@ Full list:
 Two models for Equivalent Narcotic Depth:
 
 ```python
-# O2 non-narcotic (GUE, default, o2_narcotic=False)
+# O2 non-narcotic (default, o2_narcotic=False)
 end = (depth + 10) * (fN2 / 0.79) - 10
 
 # O2 narcotic (PADI/NOAA, o2_narcotic=True)

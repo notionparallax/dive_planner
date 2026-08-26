@@ -114,16 +114,13 @@ from scenario_helpers import (  # noqa: E402
 with st.sidebar:
     st.title("🤿 Dive Planner")
 
-    depth_unit = st.radio(
-        "Units",
-        ["metric", "imperial"],
-        index=0 if _qp.get("units", "metric") != "imperial" else 1,
-        horizontal=True,
-        format_func=lambda u: "Metric (m)" if u == "metric" else "Imperial (ft)",
-    )
+    # Actual widget lives in the Settings expander below; read the persisted value
+    # here (same early-read pattern as o2_narcotic) since several widgets above
+    # Settings need it for their unit-converted min/max/value.
+    depth_unit = _qp.get("units", "metric")
 
     st.subheader("Depth & Time")
-    _depth_default_m = _qpi("depth", 48)
+    _depth_default_m = _qpi("depth", 40)
     depth = round(
         from_display_depth(
             st.number_input(
@@ -452,7 +449,7 @@ with st.sidebar:
                     max_value=int(round(to_display_depth(40, depth_unit))),
                     value=int(round(to_display_depth(30, depth_unit))),
                     step=1,
-                    help="Equivalent Narcotic Depth. GUE standard is 30m. Set lower for a more conservative mix.",
+                    help="Equivalent Narcotic Depth. 30m is a common default. Set lower for a more conservative mix.",
                 ),
                 depth_unit,
             )
@@ -480,6 +477,14 @@ with st.sidebar:
             st.rerun()
 
     with st.expander("⚙️ Settings", expanded=False):
+        depth_unit = st.radio(
+            "Units",
+            ["metric", "imperial"],
+            index=0 if depth_unit != "imperial" else 1,
+            horizontal=True,
+            format_func=lambda u: "Metric (m)" if u == "metric" else "Imperial (ft)",
+            key="units_radio",
+        )
         st.caption("Warning thresholds")
         ppo2_bottom = st.number_input(
             "ppO₂ bottom limit (bar)",
@@ -488,7 +493,7 @@ with st.sidebar:
             value=_qpf("ppo2_bot", 1.4),
             step=0.05,
             format="%.2f",
-            help="Back gas ppO₂ above this triggers a warning on the main dive and standard scenarios. GUE/WKPP standard: 1.4 bar.",
+            help="Back gas ppO₂ above this triggers a warning on the main dive and standard scenarios. Default: 1.4 bar.",
         )
         ppo2_contingency_tol = st.number_input(
             "Contingency ppO₂ tolerance (bar)",
@@ -511,7 +516,7 @@ with st.sidebar:
             value=_qpf("dens_lim", 6.2),
             step=0.1,
             format="%.1f",
-            help="Warn if back gas density exceeds this value. GUE/WKPP limit is 6.2 g/L; above this CNS risk increases.",
+            help="Warn if back gas density exceeds this value. 6.2 g/L is a common limit; above this CNS risk increases.",
         )
         cns_warn = st.number_input(
             "CNS warn threshold (%)",
@@ -537,7 +542,7 @@ with st.sidebar:
             "O₂ is narcotic",
             value=o2_narcotic,
             key="o2_narcotic_cb",
-            help="If checked, O₂ counts towards narcosis in the END calculation. GUE/WKPP treat O₂ as non-narcotic (default).",
+            help="If checked, O₂ counts towards narcosis in the END calculation. Default treats O₂ as non-narcotic.",
         )
 
 
@@ -1154,7 +1159,7 @@ table_rows["OTU"] = [f"{r['otu']:.0f}" for r in results]
 table_rows["CNS %"] = [f"{r['cns']:.0f}%" for r in results]
 table_rows["END"] = [
     # O2 narcotic: (depth+10)*(1-fHe-fH2)-10
-    # O2 non-narcotic (GUE, default): (depth+10)*(fN2/0.79)-10
+    # O2 non-narcotic (default): (depth+10)*(fN2/0.79)-10
     # H2 is excluded from the narcotic fraction in both models, same as He.
     fmt_depth(
         (r["depth"] + 10)

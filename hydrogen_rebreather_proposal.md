@@ -58,12 +58,12 @@ This proposal describes a rebreather architecture that eliminates the hard switc
 ```
 Gas density at 150m (16 bar):
   Air (79% N2):     ~19 g/L  [extreme breathing resistance]
-  Heliox 16/84:     ~5.6 g/L [GUE limit ~6.2 g/L]
+  Heliox 16/84:     ~5.6 g/L [common limit ~6.2 g/L]
   Hydreliox 4/10/86: ~3.8 g/L [well below density limit]
   Hydrox 4/96:       ~2.2 g/L [exceptional]
 ```
 
-At 150 m, a heliox-based trimix approaches or exceeds the GUE/WKPP gas density limit of 6.2 g/L. Hydrogen, being the lightest gas, dramatically reduces work of breathing at any depth.
+At 150 m, a heliox-based trimix approaches or exceeds the common gas density limit of 6.2 g/L. Hydrogen, being the lightest gas, dramatically reduces work of breathing at any depth.
 
 ### Diffusivity Hierarchy
 
