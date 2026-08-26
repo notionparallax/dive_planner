@@ -161,6 +161,20 @@ def _sanitize(obj):
     return obj
 
 
+def _cylinder(o2, he, volume_l, fill_bar, name):
+    """Build a CylinderConfig, treating a None He% (e.g. old JS sending null) as 0."""
+    return CylinderConfig(GasConfig(o2, he or 0), volume_l, fill_bar, name)
+
+
+def _resolve_switch_depth(switch_depth_m, o2_pct, max_ppo2_deco):
+    """Use an explicit override if given, else derive MOD from O2% at the ppO2 deco limit."""
+    if switch_depth_m is not None:
+        return switch_depth_m
+    if o2_pct > 0:
+        return calc_switch_depth(o2_pct / 100.0, max_ppo2_deco)
+    return None
+
+
 def _gas_at_depth(depth, back_cylinder, deco_cyls_with_depths):
     """Return a short gas label for the gas being breathed at a given stop depth."""
     # On ascent, switch to the deco gas with the minimum switch_depth that is >= stop depth
@@ -197,35 +211,15 @@ def health():
 
 @app.post("/api/plan")
 def plan_dive(req: PlanRequest):
-    # Build cylinder configs (he=None treated as 0 — defensive against old JS sending null)
-    back_cylinder = CylinderConfig(
-        GasConfig(req.back_gas_o2, req.back_gas_he or 0),
-        req.back_gas_volume_l,
-        req.back_gas_fill_bar,
-        f"Back Gas ({req.back_gas_o2}/{req.back_gas_he or 0})",
-    )
+    back_cylinder = _cylinder(req.back_gas_o2, req.back_gas_he, req.back_gas_volume_l,
+                              req.back_gas_fill_bar, f"Back Gas ({req.back_gas_o2}/{req.back_gas_he or 0})")
+    deco1_cylinder = _cylinder(req.deco1_o2, req.deco1_he, req.deco1_volume_l,
+                               req.deco1_fill_bar, f"Deco 1 ({req.deco1_o2}/{req.deco1_he or 0})")
+    deco2_cylinder = _cylinder(req.deco2_o2, req.deco2_he, req.deco2_volume_l,
+                               req.deco2_fill_bar, f"Deco 2 ({req.deco2_o2}/{req.deco2_he or 0})")
 
-    deco1_cylinder = CylinderConfig(
-        GasConfig(req.deco1_o2, req.deco1_he or 0),
-        req.deco1_volume_l,
-        req.deco1_fill_bar,
-        f"Deco 1 ({req.deco1_o2}/{req.deco1_he or 0})",
-    )
-    deco2_cylinder = CylinderConfig(
-        GasConfig(req.deco2_o2, req.deco2_he or 0),
-        req.deco2_volume_l,
-        req.deco2_fill_bar,
-        f"Deco 2 ({req.deco2_o2}/{req.deco2_he or 0})",
-    )
-
-    # Compute switch depths
-    sd1 = req.deco1_switch_depth_m
-    if sd1 is None and req.deco1_o2 > 0:
-        sd1 = calc_switch_depth(req.deco1_o2 / 100.0, req.max_ppo2_deco)
-
-    sd2 = req.deco2_switch_depth_m
-    if sd2 is None and req.deco2_o2 > 0:
-        sd2 = calc_switch_depth(req.deco2_o2 / 100.0, req.max_ppo2_deco)
+    sd1 = _resolve_switch_depth(req.deco1_switch_depth_m, req.deco1_o2, req.max_ppo2_deco)
+    sd2 = _resolve_switch_depth(req.deco2_switch_depth_m, req.deco2_o2, req.max_ppo2_deco)
 
     # Build deco cylinders list (filter out disabled or lost gases)
     deco_cyls_with_depths = []
@@ -247,22 +241,15 @@ def plan_dive(req: PlanRequest):
         "API Plan", req.depth, req.bottom_time,
         deco_gases_lost=req.deco_gases_lost,
         cfg=cfg,
+        emergency_sac=req.sac_emergency,
     )
 
-    # Pull steps out (not JSON-serialisable) then run gas planning
-    steps = scenario.pop('steps', None)
-
-    deco_cylinders_for_plan = [c for c, _ in deco_cyls_with_depths]
-    if steps is not None:
-        gas_plan = calc_gas_plan(
-            steps, req.depth, back_cylinder, deco_cylinders_for_plan,
-            dive_mode=req.dive_mode,
-            emergency_sac=req.sac_emergency,
-            contingency=req.contingency,
-            practical_empty_bar=req.practical_empty_bar,
-        )
-    else:
-        gas_plan = {}
+    gas_plan = calc_gas_plan(
+        scenario['min_gas'], back_cylinder, deco_cyls_with_depths,
+        dive_mode=req.dive_mode,
+        contingency=req.contingency,
+        practical_empty_bar=req.practical_empty_bar,
+    )
 
     # Build structured deco schedule
     scenario['deco_schedule'] = _build_deco_schedule(
@@ -293,28 +280,15 @@ def plan_dive(req: PlanRequest):
 def optimise_bottom_time_endpoint(req: OptimiseRequest):
     from optimiser import optimise_bottom_time
 
-    back_cylinder = CylinderConfig(
-        GasConfig(req.back_gas_o2, req.back_gas_he or 0),
-        req.back_gas_volume_l, req.back_gas_fill_bar,
-        f"Back Gas ({req.back_gas_o2}/{req.back_gas_he or 0})",
-    )
-    deco1_cylinder = CylinderConfig(
-        GasConfig(req.deco1_o2, req.deco1_he or 0),
-        req.deco1_volume_l, req.deco1_fill_bar,
-        f"Deco 1 ({req.deco1_o2}/{req.deco1_he or 0})",
-    )
-    deco2_cylinder = CylinderConfig(
-        GasConfig(req.deco2_o2, req.deco2_he or 0),
-        req.deco2_volume_l, req.deco2_fill_bar,
-        f"Deco 2 ({req.deco2_o2}/{req.deco2_he or 0})",
-    )
+    back_cylinder = _cylinder(req.back_gas_o2, req.back_gas_he, req.back_gas_volume_l,
+                              req.back_gas_fill_bar, f"Back Gas ({req.back_gas_o2}/{req.back_gas_he or 0})")
+    deco1_cylinder = _cylinder(req.deco1_o2, req.deco1_he, req.deco1_volume_l,
+                               req.deco1_fill_bar, f"Deco 1 ({req.deco1_o2}/{req.deco1_he or 0})")
+    deco2_cylinder = _cylinder(req.deco2_o2, req.deco2_he, req.deco2_volume_l,
+                               req.deco2_fill_bar, f"Deco 2 ({req.deco2_o2}/{req.deco2_he or 0})")
 
-    sd1 = req.deco1_switch_depth_m
-    if sd1 is None and req.deco1_o2 > 0:
-        sd1 = calc_switch_depth(req.deco1_o2 / 100.0, req.max_ppo2_deco)
-    sd2 = req.deco2_switch_depth_m
-    if sd2 is None and req.deco2_o2 > 0:
-        sd2 = calc_switch_depth(req.deco2_o2 / 100.0, req.max_ppo2_deco)
+    sd1 = _resolve_switch_depth(req.deco1_switch_depth_m, req.deco1_o2, req.max_ppo2_deco)
+    sd2 = _resolve_switch_depth(req.deco2_switch_depth_m, req.deco2_o2, req.max_ppo2_deco)
 
     deco_cyls_with_depths = []
     if req.deco1_enabled and sd1 is not None:
@@ -373,11 +347,8 @@ def optimise_bottom_time_endpoint(req: OptimiseRequest):
 def optimise_full_endpoint(req: FullOptimiseRequest):
     from optimiser import optimise_both_deco_gases
 
-    back_cylinder = CylinderConfig(
-        GasConfig(req.back_gas_o2, req.back_gas_he or 0),
-        req.back_gas_volume_l, req.back_gas_fill_bar,
-        f"Back Gas ({req.back_gas_o2}/{req.back_gas_he or 0})",
-    )
+    back_cylinder = _cylinder(req.back_gas_o2, req.back_gas_he, req.back_gas_volume_l,
+                              req.back_gas_fill_bar, f"Back Gas ({req.back_gas_o2}/{req.back_gas_he or 0})")
 
     result = optimise_both_deco_gases(
         depth=req.depth,
@@ -416,8 +387,8 @@ def optimise_full_endpoint(req: FullOptimiseRequest):
         bd2_sd = result['best_deco2_switch_depth']
 
         d2_label = "Deco 2 (O2)" if bd2_o2 == 100 else f"Deco 2 (EAN{bd2_o2})"
-        best_deco1_cyl = CylinderConfig(GasConfig(bd1_o2, 0), req.deco1_volume_l, req.deco1_fill_bar, f"Deco 1 (EAN{bd1_o2})")
-        best_deco2_cyl = CylinderConfig(GasConfig(bd2_o2, 0), req.deco2_volume_l, req.deco2_fill_bar, d2_label)
+        best_deco1_cyl = _cylinder(bd1_o2, 0, req.deco1_volume_l, req.deco1_fill_bar, f"Deco 1 (EAN{bd1_o2})")
+        best_deco2_cyl = _cylinder(bd2_o2, 0, req.deco2_volume_l, req.deco2_fill_bar, d2_label)
         best_deco_cyls = [(best_deco1_cyl, int(bd1_sd)), (best_deco2_cyl, int(bd2_sd))]
 
         best_scenario['deco_schedule'] = _build_deco_schedule(

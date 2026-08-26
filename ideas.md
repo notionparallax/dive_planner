@@ -17,6 +17,7 @@
 ## Multi-level Dives 💡
 
 Allow a stepped profile (e.g. 40m → 30m → 20m), common in wreck diving. The descent stops mechanism already exists; the main work is:
+
 - UI to define depth/time waypoints
 - Ceiling computation across the full stepped profile
 - Deciding how scenarios (deeper, longer) interact with a multi-level plan

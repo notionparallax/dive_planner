@@ -1,9 +1,14 @@
 """
-Pure gas planning logic: cave rule-of-thirds, open-water minimum gas,
-switch depth calculation, and orchestration.
+Pure gas planning logic: cave rule-of-thirds, switch depth calculation, and orchestration.
+
+Open-water minimum gas is NOT computed here — that math lives in a single place,
+dive_plan.calculate_min_gas_and_turn_from_summary(), which calc_gas_plan() below just
+reports. An earlier version of this module recomputed it independently from a per-step
+dive trace ('steps') that decodaitengu's plan_dive() has never actually produced, so that
+code path was permanently a no-op; see calc_gas_plan()'s docstring.
 """
 from math import floor
-from dive_plan import CylinderConfig, SURFACE_PRESSURE
+from dive_plan import CylinderConfig
 
 
 def calc_cave_turn_pressure(fill_pressure_bar: float,
@@ -28,126 +33,6 @@ def calc_cave_turn_pressure(fill_pressure_bar: float,
     }
 
 
-def calc_cave_deco_min_gas(steps, cylinder: CylinderConfig,
-                            emergency_sac: float = 30.0,
-                            contingency: float = 1.0,
-                            practical_empty_bar: float = 20.0) -> dict:
-    """
-    Cave deco gas minimum: 2× the gas used on ascent with this cylinder's gas.
-
-    Deco gases are only used on ascent in cave mode (no penetration portion),
-    so the reserve doubles what you need for ascent.
-    """
-    o2 = cylinder.gas.o2
-    he = cylinder.gas.he
-
-    ascent_started = False
-    gas_used_litres = 0.0
-
-    for i in range(1, len(steps)):
-        prev = steps[i - 1]
-        curr = steps[i]
-        dt = curr.time - prev.time
-        if dt <= 0:
-            continue
-
-        if not ascent_started and prev.phase == 'const':
-            ascent_started = True
-
-        if not ascent_started:
-            continue
-
-        if curr.gas.o2 == o2 and curr.gas.he == he:
-            avg_p = (prev.abs_p + curr.abs_p) / 2.0
-            ambient_ata = avg_p / SURFACE_PRESSURE
-            gas_used_litres += emergency_sac * dt * ambient_ata
-
-    min_litres = gas_used_litres * 2 * contingency
-    min_bar = min_litres / cylinder.volume_l
-    available_litres = (cylinder.fill_pressure_bar - practical_empty_bar) * cylinder.volume_l
-    sufficient = available_litres >= min_litres
-
-    return {
-        'min_litres': min_litres,
-        'min_bar': min_bar,
-        'available_litres': available_litres,
-        'sufficient': sufficient,
-        'practical_empty': practical_empty_bar,
-    }
-
-
-def calc_ow_min_gas(steps, depth: float, cylinder: CylinderConfig,
-                    emergency_sac: float = 30.0,
-                    contingency: float = 1.0,
-                    practical_empty_bar: float = 20.0) -> dict:
-    """
-    Open-water minimum gas for a 2-diver back-gas ascent.
-
-    = (1 min problem-solving at max depth + back-gas ascent to first deco switch)
-      × 2 divers × emergency_sac
-    """
-    o2 = cylinder.gas.o2
-    he = cylinder.gas.he
-
-    max_p = max(s.abs_p for s in steps)
-    problem_solve_one = emergency_sac * 1.0 * (max_p / SURFACE_PRESSURE)
-
-    # Sum back gas from start of ascent to first gas switch
-    ascent_started = False
-    back_gas_ascent = 0.0
-    for i in range(1, len(steps)):
-        prev = steps[i - 1]
-        curr = steps[i]
-        dt = curr.time - prev.time
-        if dt <= 0:
-            continue
-
-        if not ascent_started and prev.phase == 'const':
-            ascent_started = True
-
-        if not ascent_started:
-            continue
-
-        if curr.gas.o2 == o2 and curr.gas.he == he:
-            avg_p = (prev.abs_p + curr.abs_p) / 2.0
-            ambient_ata = avg_p / SURFACE_PRESSURE
-            back_gas_ascent += emergency_sac * dt * ambient_ata
-        else:
-            break  # switched to deco gas
-
-    min_litres = (problem_solve_one + back_gas_ascent) * 2 * contingency
-    turn_pressure_bar = min_litres / cylinder.volume_l + practical_empty_bar
-
-    # Bar remaining at start of ascent (gas used on descent + bottom)
-    gas_before_ascent = 0.0
-    for i in range(1, len(steps)):
-        prev = steps[i - 1]
-        curr = steps[i]
-        dt = curr.time - prev.time
-        if dt <= 0:
-            continue
-        if curr.phase in ('descent', 'const'):
-            avg_p = (prev.abs_p + curr.abs_p) / 2.0
-            ambient_ata = avg_p / SURFACE_PRESSURE
-            gas_before_ascent += emergency_sac * dt * ambient_ata
-        else:
-            break
-
-    bar_used = gas_before_ascent / cylinder.volume_l
-    bar_at_turn = cylinder.fill_pressure_bar - bar_used
-    has_enough_gas = bar_at_turn >= turn_pressure_bar
-    binding = 'gas_sufficient' if has_enough_gas else 'insufficient_gas'
-
-    return {
-        'min_litres': min_litres,
-        'turn_pressure_bar': turn_pressure_bar,
-        'bar_at_turn': bar_at_turn,
-        'has_enough_gas': has_enough_gas,
-        'binding': binding,
-        'practical_empty': practical_empty_bar,
-    }
-
-
 def calc_switch_depth(o2_frac: float, max_ppo2: float = 1.6, surface_pressure: float = 1.01325) -> int:
     """MOD in whole metres: deepest depth where this gas stays at or below max_ppo2.
 
@@ -163,14 +48,26 @@ def calc_switch_depth(o2_frac: float, max_ppo2: float = 1.6, surface_pressure: f
     return result
 
 
-def calc_gas_plan(steps, depth: float, back_cylinder: CylinderConfig,
-                  deco_cylinders: list, dive_mode: str = 'open_water',
-                  emergency_sac: float = 30.0, contingency: float = 1.0,
+def calc_gas_plan(min_gas: dict, back_cylinder: CylinderConfig,
+                  deco_cylinders_with_depths: list, dive_mode: str = 'open_water',
+                  contingency: float = 1.0,
                   practical_empty_bar: float = 20.0) -> dict:
     """
-    Orchestrate gas planning for all cylinders.
+    Orchestrate gas plan reporting for the back gas and deco gases.
 
-    Returns a dict with back_gas analysis and per-deco-cylinder analysis.
+    min_gas: the dict already returned by run_scenario()['min_gas'] (computed by
+        dive_plan.calculate_min_gas_and_turn_from_summary) for this exact dive — the
+        one place that math is done. Not recomputed here.
+    deco_cylinders_with_depths: list of (CylinderConfig, switch_depth_m) — the switch
+        depths actually used to plan the dive, not re-derived from ppO2.
+    contingency: multiplier applied on top of the reported open-water min gas
+        (e.g. 1.1-1.5x margin). Cave mode's rule-of-thirds turn pressure has no
+        equivalent contingency knob.
+
+    Cave-mode deco-gas minimum gas is not reported: it would need a per-depth
+    ascent gas-usage breakdown that decodaitengu's DiveSummary doesn't expose
+    (there is no 'steps' trace — only aggregate profile/gas_usage). Only the
+    deco gas's switch depth is reported for cave mode.
     """
     result = {}
 
@@ -180,22 +77,26 @@ def calc_gas_plan(steps, depth: float, back_cylinder: CylinderConfig,
             'cave_turn': calc_cave_turn_pressure(back_cylinder.fill_pressure_bar, practical_empty_bar),
         }
     else:
+        min_litres = min_gas['min_gas_litres'] * contingency
+        turn_pressure_bar = min_gas['turn_pressure_bar'] * contingency
         result['back_gas'] = {
             'name': back_cylinder.name,
-            'ow_min_gas': calc_ow_min_gas(steps, depth, back_cylinder, emergency_sac, contingency, practical_empty_bar),
+            'ow_min_gas': {
+                'min_litres': min_litres,
+                'turn_pressure_bar': turn_pressure_bar,
+                'bar_at_turn': min_gas['bar_at_turn'],
+                'has_enough_gas': min_gas['bar_at_turn'] >= turn_pressure_bar,
+                'practical_empty': practical_empty_bar,
+            },
         }
 
-    result['deco_gases'] = []
-    for cyl in deco_cylinders:
-        o2_frac = cyl.gas.o2 / 100.0
-        switch_depth = calc_switch_depth(o2_frac) if o2_frac > 0 else None
-        deco_info = {
+    result['deco_gases'] = [
+        {
             'name': cyl.name,
             'gas': {'o2': cyl.gas.o2, 'he': cyl.gas.he},
-            'switch_depth_m': switch_depth,
+            'switch_depth_m': sd,
         }
-        if dive_mode == 'cave':
-            deco_info['min_gas'] = calc_cave_deco_min_gas(steps, cyl, emergency_sac, contingency, practical_empty_bar)
-        result['deco_gases'].append(deco_info)
+        for cyl, sd in deco_cylinders_with_depths
+    ]
 
     return result

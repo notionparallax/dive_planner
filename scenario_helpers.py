@@ -11,20 +11,31 @@ _SCENARIO_COLS = ["enabled", "name", "depth", "time",
                   "lost", "gf_low", "gf_high", "ascent_rate", "sac_override"]
 
 
-def _default_scenario_rows(lean_o2_pct: int, rich_o2_pct: int) -> list[dict]:
-    """Return the default 10-scenario list as a list of dicts."""
-    return [
-        dict(enabled=True, name="Main",                   depth="+0", time="+0", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True, name="Longer",                 depth="+0", time="+3", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True, name="Deeper",                 depth="+3", time="+0", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True, name="D & L",                  depth="+3", time="+3", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True, name=f"No {lean_o2_pct}%",     depth="+0", time="+0", lost="lean", gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True, name=f"No {rich_o2_pct}%",     depth="+0", time="+0", lost="rich", gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True, name=f"No {lean_o2_pct}% (D)", depth="+3", time="+3", lost="lean", gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True, name=f"No {rich_o2_pct}% (D)", depth="+3", time="+3", lost="rich", gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True, name="Bounce",                 depth="+0", time="10", lost="",     gf_low="",   gf_high="",   ascent_rate="", sac_override=""),
-        dict(enabled=True, name="Emergency",              depth="+0", time="+0", lost="",     gf_low="99", gf_high="99", ascent_rate="fast", sac_override=""),
+def _default_scenario_rows(lean_o2_pct: int, rich_o2_pct: int,
+                            lean_enabled: bool = True, rich_enabled: bool = True) -> list[dict]:
+    """Return the default scenario list as a list of dicts.
+
+    "No X%" (lost-gas) contingency rows are only generated for a gas that's
+    actually part of the plan (lean_enabled/rich_enabled) — there's nothing to
+    lose if the cylinder was never carried.
+    """
+    rows = [
+        dict(enabled=True, name="Main",   depth="+0", time="+0", lost="", gf_low="", gf_high="", ascent_rate="", sac_override=""),
+        dict(enabled=True, name="Longer", depth="+0", time="+3", lost="", gf_low="", gf_high="", ascent_rate="", sac_override=""),
+        dict(enabled=True, name="Deeper", depth="+3", time="+0", lost="", gf_low="", gf_high="", ascent_rate="", sac_override=""),
+        dict(enabled=True, name="D & L",  depth="+3", time="+3", lost="", gf_low="", gf_high="", ascent_rate="", sac_override=""),
     ]
+    if lean_enabled:
+        rows.append(dict(enabled=True, name=f"No {lean_o2_pct}%",     depth="+0", time="+0", lost="lean", gf_low="", gf_high="", ascent_rate="", sac_override=""))
+    if rich_enabled:
+        rows.append(dict(enabled=True, name=f"No {rich_o2_pct}%",     depth="+0", time="+0", lost="rich", gf_low="", gf_high="", ascent_rate="", sac_override=""))
+    if lean_enabled:
+        rows.append(dict(enabled=True, name=f"No {lean_o2_pct}% (D)", depth="+3", time="+3", lost="lean", gf_low="", gf_high="", ascent_rate="", sac_override=""))
+    if rich_enabled:
+        rows.append(dict(enabled=True, name=f"No {rich_o2_pct}% (D)", depth="+3", time="+3", lost="rich", gf_low="", gf_high="", ascent_rate="", sac_override=""))
+    rows.append(dict(enabled=True, name="Bounce",    depth="+0", time="10", lost="", gf_low="",   gf_high="",   ascent_rate="",     sac_override=""))
+    rows.append(dict(enabled=True, name="Emergency", depth="+0", time="+0", lost="", gf_low="99", gf_high="99", ascent_rate="fast", sac_override=""))
+    return rows
 
 
 def _parse_dim(val: str, base: int) -> int:
@@ -102,14 +113,15 @@ def _scenarios_to_b64(df) -> str:
     ).decode()
 
 
-def _b64_to_scenarios_df(s: str, lean_o2_pct: int, rich_o2_pct: int):
+def _b64_to_scenarios_df(s: str, lean_o2_pct: int, rich_o2_pct: int,
+                          lean_enabled: bool = True, rich_enabled: bool = True):
     try:
         rows = json.loads(base64.urlsafe_b64decode(s.encode()).decode())
         import pandas as pd
         return pd.DataFrame(rows)[_SCENARIO_COLS]
     except Exception:
         import pandas as pd
-        return pd.DataFrame(_default_scenario_rows(lean_o2_pct, rich_o2_pct))
+        return pd.DataFrame(_default_scenario_rows(lean_o2_pct, rich_o2_pct, lean_enabled, rich_enabled))
 
 
 def _build_contingency_specs(rows, D: int, gfl: float, gfh: float, ar, sb: float, sd: float) -> list[dict]:

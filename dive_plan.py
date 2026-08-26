@@ -1,9 +1,8 @@
 """
-Dive planner using decotengu for Bühlmann ZH-L16B-GF decompression calculations.
+Dive planner using decotengu for Bühlmann ZHL-16C-GF decompression calculations.
 """
 from decodaitengu.planning import plan_dive as _plan_dive
 from decodaitengu.types import Gas as _Gas, Cylinder as _Cylinder
-import matplotlib.pyplot as plt
 from dataclasses import dataclass
 
 
@@ -21,16 +20,6 @@ class CylinderConfig:
     volume_l: float
     fill_pressure_bar: int
     name: str
-
-
-@dataclass
-class DiveConfig:
-    depth: float
-    bottom_time: float
-    gf_low: float = 0.50
-    gf_high: float = 0.70
-    descent_rate: float = 20
-    ascent_rate: float = 10
 
 
 # === Configuration ===
@@ -79,8 +68,8 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
                sac_bottom=None, sac_deco=None,
                back_gas_pressure=None, deco_50_pressure=None, deco_o2_pressure=None,
                back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
-               lean_gas=None, lean_switch=None,
-               rich_gas=None, rich_switch=None,
+               lean_gas=None, lean_switch=None, lean_enabled=True,
+               rich_gas=None, rich_switch=None, rich_enabled=True,
                descent_stops=None,
                travel_gas_config=None,
                gas_switch_time=None):
@@ -136,10 +125,14 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
             deco_gas_objs.append(_Gas(o2=o2, he=he, switch_depth=float(sd), label=label))
             deco_cyl_objs.append(_Cylinder(volume_litres=vol, fill_bar=pressure))
     else:
+        _lost_list = deco_gases_lost if isinstance(deco_gases_lost, list) else []
+        def _is_lost(role):
+            return deco_gases_lost is True or deco_gases_lost == role or role in _lost_list
+
         _deco_gases_tagged = []
-        if deco_gases_lost not in (True, 'lean'):
+        if lean_enabled and not _is_lost('lean'):
             _deco_gases_tagged.append(('lean', *_lean_gas, _lean_switch))
-        if deco_gases_lost not in (True, 'rich'):
+        if rich_enabled and not _is_lost('rich'):
             _deco_gases_tagged.append(('rich', *_rich_gas, _rich_switch))
 
         deco_gas_objs = []
@@ -190,25 +183,26 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
     )
 
 
-def format_gas_bar(used_litres, cylinder_vol, cylinder_pressure):
-    """Convert litres used to bar remaining."""
-    bar_used = used_litres / cylinder_vol
-    remaining = cylinder_pressure - bar_used
-    return remaining
-
-
 def calculate_min_gas_and_turn_from_summary(summary, back_gas_pressure, back_gas_vol=None,
-                                             sac_bottom=None):
+                                             sac_bottom=None, emergency_sac=None):
     """Calculate minimum gas (2 divers ascending on back gas) and turn pressure from DiveSummary.
+
+    This is the single source of truth for open-water minimum-gas / turn-pressure math —
+    both the Streamlit app (via run_scenario) and the API/optimiser (via calc_gas_plan)
+    read the 'min_gas' dict this produces rather than recomputing it themselves.
 
     Args:
         summary: DiveSummary from run_profile().
         back_gas_pressure: Fill pressure of back gas cylinder [bar].
         back_gas_vol: Volume of back gas cylinder [L]. Defaults to BACK_GAS_VOL.
-        sac_bottom: SAC for stressed breathing [L/min]. Defaults to SAC_BOTTOM.
+        sac_bottom: SAC the dive was planned at [L/min]. Defaults to SAC_BOTTOM.
+        emergency_sac: Stressed/out-of-gas SAC rate to use for the min-gas safety margin
+            [L/min]. Defaults to sac_bottom (i.e. no stress multiplier) — pass e.g. 30 to
+            model an elevated emergency breathing rate on top of the planned dive.
     """
     _back_gas_vol = back_gas_vol if back_gas_vol is not None else BACK_GAS_VOL
     _sac_bottom = sac_bottom if sac_bottom is not None else SAC_BOTTOM
+    _emergency_sac = emergency_sac if emergency_sac is not None else _sac_bottom
 
     depth = summary.max_depth
     abs_p_bottom = SURFACE_PRESSURE + depth / 10.0
@@ -235,9 +229,12 @@ def calculate_min_gas_and_turn_from_summary(summary, back_gas_pressure, back_gas
     bar_used_before_ascent = gas_used_before_ascent / _back_gas_vol
     bar_at_turn = back_gas_pressure - bar_used_before_ascent
 
-    # Min gas = (1 min problem-solving at depth + ascent back gas) x 2 divers
-    ascent_back_gas_one = summary.back_gas_ascent_litres
-    problem_solve_one = _sac_bottom * 1.0 * abs_p_bottom / SURFACE_PRESSURE
+    # Min gas = (1 min problem-solving at depth + ascent back gas) x 2 divers, at the
+    # emergency SAC rate. back_gas_ascent_litres was computed at the planned sac_bottom,
+    # so scale it linearly to the emergency rate rather than re-running the dive.
+    stress_factor = _emergency_sac / _sac_bottom
+    ascent_back_gas_one = summary.back_gas_ascent_litres * stress_factor
+    problem_solve_one = _emergency_sac * 1.0 * abs_p_bottom / SURFACE_PRESSURE
     min_gas_litres = (ascent_back_gas_one + problem_solve_one) * 2
     turn_pressure_bar = min_gas_litres / _back_gas_vol
 
@@ -257,11 +254,12 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
                  back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
                  gf_low=None, gf_high=None, descent_rate=None, ascent_rate=None,
                  sac_bottom=None, sac_deco=None,
-                 lean_gas=None, lean_switch=None,
-                 rich_gas=None, rich_switch=None,
+                 lean_gas=None, lean_switch=None, lean_enabled=True,
+                 rich_gas=None, rich_switch=None, rich_enabled=True,
                  descent_stops=None,
                  travel_gas_config=None,
-                 gas_switch_time=None):
+                 gas_switch_time=None,
+                 emergency_sac=None):
     """Run a complete scenario and return results dict.
 
     cfg: optional dict with keys:
@@ -274,7 +272,9 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
     deco_50_pressure: override fill pressure for EAN50 (default: DECO_50_PRESSURE)
     deco_o2_pressure: override fill pressure for O2 (default: DECO_O2_PRESSURE)
     descent_stops: list of (depth_m, time_min) stops during descent (e.g. S-drills).
-    When cfg is provided, also returns 'cylinders' and 'steps' (None) in the result.
+    emergency_sac: stressed SAC rate [L/min] for the returned 'min_gas' safety margin
+        (see calculate_min_gas_and_turn_from_summary). Defaults to sac_bottom.
+    When cfg is provided, also returns 'cylinders' in the result.
     """
     _back_gas_pressure = back_gas_pressure if back_gas_pressure is not None else BACK_GAS_PRESSURE
     _deco_50_pressure = deco_50_pressure if deco_50_pressure is not None else DECO_50_PRESSURE
@@ -356,12 +356,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
                 'remaining_bar': remaining_bar,
             })
 
-        min_gas = calculate_min_gas_and_turn_from_summary(
-            summary,
-            back_gas_pressure=_back_gas_pressure,
-            back_gas_vol=back_cyl.volume_l,
-            sac_bottom=_sac_bottom,
-        )
+        _min_gas_back_vol = back_cyl.volume_l
 
         back_remaining = cylinders_result[0]['remaining_bar'] if cylinders_result else None
         lean_remaining = next(
@@ -385,8 +380,8 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             back_gas_vol=_back_gas_vol,
             deco_50_vol=_deco_50_vol,
             deco_o2_vol=_deco_o2_vol,
-            lean_gas=_lean_gas, lean_switch=_lean_switch,
-            rich_gas=_rich_gas, rich_switch=_rich_switch,
+            lean_gas=_lean_gas, lean_switch=_lean_switch, lean_enabled=lean_enabled,
+            rich_gas=_rich_gas, rich_switch=_rich_switch, rich_enabled=rich_enabled,
             descent_stops=descent_stops,
             travel_gas_config=travel_gas_config,
             gas_switch_time=gas_switch_time,
@@ -398,8 +393,8 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         travel_usage = summary.gas_usage.get('travel')
 
         back_remaining = back_usage.remaining_bar if back_usage else _back_gas_pressure
-        lean_remaining = lean_usage.remaining_bar if lean_usage else _deco_50_pressure
-        rich_remaining = rich_usage.remaining_bar if rich_usage else _deco_o2_pressure
+        lean_remaining = (lean_usage.remaining_bar if lean_usage else _deco_50_pressure) if lean_enabled else None
+        rich_remaining = (rich_usage.remaining_bar if rich_usage else _deco_o2_pressure) if rich_enabled else None
         travel_remaining = travel_usage.remaining_bar if travel_usage else (
             travel_gas_config[2] if travel_gas_config else None
         )
@@ -410,18 +405,21 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             'rich': rich_usage.consumed_litres if rich_usage else 0.0,
         }
 
-        min_gas = calculate_min_gas_and_turn_from_summary(
-            summary,
-            back_gas_pressure=_back_gas_pressure,
-            back_gas_vol=_back_gas_vol,
-            sac_bottom=_sac_bottom,
-        )
+        _min_gas_back_vol = _back_gas_vol
 
         has_switch_stop = False
         switch_depth = _lean_switch
         cylinders_result = None
         if travel_remaining is None:
             pass  # already None
+
+    min_gas = calculate_min_gas_and_turn_from_summary(
+        summary,
+        back_gas_pressure=_back_gas_pressure,
+        back_gas_vol=_min_gas_back_vol,
+        sac_bottom=_sac_bottom,
+        emergency_sac=emergency_sac,
+    )
 
     # Build deco_stops
     deco_stops = [(s.depth, s.time) for s in summary.stops]
@@ -450,10 +448,10 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
         'lean_remaining_bar': lean_remaining,
         'rich_remaining_bar': rich_remaining,
         'travel_remaining_bar': travel_remaining,
-        'lean_gas': _lean_gas,
-        'rich_gas': _rich_gas,
-        'lean_switch': _lean_switch,
-        'rich_switch': _rich_switch,
+        'lean_gas': _lean_gas if lean_enabled else None,
+        'rich_gas': _rich_gas if rich_enabled else None,
+        'lean_switch': _lean_switch if lean_enabled else None,
+        'rich_switch': _rich_switch if rich_enabled else None,
         'min_gas': min_gas,
         'max_gas_density': summary.max_gas_density,
         'icd_warnings': summary.icd_warnings,
@@ -463,176 +461,8 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
 
     if cfg is not None:
         result['cylinders'] = cylinders_result
-        result['steps'] = None
 
     return result
-
-
-def print_table(results):
-    """Print a comparison table of all scenarios."""
-    # Header
-    col_width = 18
-    header = f"{'Parameter':<25}"
-    for r in results:
-        header += f"{r['name']:>{col_width}}"
-    print(header)
-    print("=" * len(header))
-
-    # Rows
-    rows = [
-        ("Depth (m)", lambda r: f"{r['depth']}"),
-        ("Bottom time (min)", lambda r: f"{r['bottom_time']}"),
-        ("Total deco (min)", lambda r: f"{r['total_deco']:.0f}"),
-        ("Total runtime (min)", lambda r: f"{r['total_time']:.1f}"),
-        ("", lambda r: ""),
-    ]
-
-    # Add deco stop rows - gather all unique depths
-    all_stop_depths = set()
-    for r in results:
-        for depth, time in r['deco_stops']:
-            all_stop_depths.add(depth)
-    for d in sorted(all_stop_depths, reverse=True):
-        rows.append((
-            f"  Stop {d:.0f}m (min)",
-            lambda r, d=d: next((f"{t:.0f}" for dp, t in r['deco_stops'] if dp == d), "-")
-        ))
-
-    rows.extend([
-        ("", lambda r: ""),
-        ("Back gas used (bar)", lambda r: f"{(BACK_GAS_PRESSURE - r['back_remaining_bar']):.0f}"),
-        ("Back gas remaining (bar)", lambda r: f"{r['back_remaining_bar']:.0f}"),
-        ("EAN50 used (bar)", lambda r: f"{(DECO_50_PRESSURE - r['lean_remaining_bar']):.0f}" if r['deco_gases_lost'] not in (True, 'lean') else "N/A"),
-        ("EAN50 remaining (bar)", lambda r: f"{r['lean_remaining_bar']:.0f}" if r['deco_gases_lost'] not in (True, 'lean') else "N/A"),
-        ("O2 used (bar)", lambda r: f"{(DECO_O2_PRESSURE - r['rich_remaining_bar']):.0f}" if r['deco_gases_lost'] not in (True, 'rich') else "N/A"),
-        ("O2 remaining (bar)", lambda r: f"{r['rich_remaining_bar']:.0f}" if r['deco_gases_lost'] not in (True, 'rich') else "N/A"),
-        ("", lambda r: ""),
-        ("--- O2 TOXICITY ---", lambda r: ""),
-        ("OTU", lambda r: f"{r['otu']:.0f}"),
-        ("CNS %", lambda r: f"{r['cns']:.0f}%"),
-        ("", lambda r: ""),
-        ("--- RULE OF THIRDS ---", lambda r: ""),
-        ("Thirds turn (bar)", lambda r: f"{BACK_GAS_PRESSURE * 2 // 3:.0f}"),
-        ("Bar at turn (actual)", lambda r: f"{r['min_gas']['bar_at_turn']:.0f}"),
-        ("Turns within thirds?", lambda r: "YES" if r['min_gas']['bar_at_turn'] >= (BACK_GAS_PRESSURE * 2 / 3) else "NO"),
-        ("", lambda r: ""),
-        ("--- END GAS ---", lambda r: ""),
-        ("End: Back/50/O2 (bar)", lambda r:
-            f"{r['back_remaining_bar']:.0f}/{r['lean_remaining_bar']:.0f}/{r['rich_remaining_bar']:.0f}"
-            if r['deco_gases_lost'] is False else
-            f"{r['back_remaining_bar']:.0f}/--/{r['rich_remaining_bar']:.0f}"
-            if r['deco_gases_lost'] == 'lean' else
-            f"{r['back_remaining_bar']:.0f}/{r['lean_remaining_bar']:.0f}/--"
-            if r['deco_gases_lost'] == 'rich' else
-            f"{r['back_remaining_bar']:.0f}/--/--"),
-    ])
-
-    for label, fn in rows:
-        line = f"{label:<25}"
-        for r in results:
-            line += f"{fn(r):>{col_width}}"
-        print(line)
-
-
-def plot_profiles(results):
-    """Create a line graph with a table below it showing deco stop runtimes."""
-    from matplotlib.ticker import FuncFormatter
-
-    # Build table data first to determine row count for sizing
-    bottom_depths = sorted(set(r['depth'] for r in results), reverse=True)
-    all_stop_depths = sorted(
-        set(d for r in results for d, t in r['deco_stops']), reverse=True
-    )
-    num_table_rows = len(bottom_depths) + len(all_stop_depths) + 1  # +1 for header
-
-    # Size figure: plot on top, table below
-    fig, (ax_plot, ax_table) = plt.subplots(
-        2, 1, figsize=(24, 14),
-        gridspec_kw={'height_ratios': [2, 1]},
-    )
-
-    # --- Plot ---
-    for r in results:
-        ax_plot.plot(r['times'], [-d for d in r['depths']], label=r['name'], linewidth=1.5)
-
-    ax_plot.set_xlabel('Time (minutes)', fontsize=18)
-    ax_plot.set_ylabel('Depth (metres)', fontsize=18)
-    ax_plot.set_title('Dive Profile Comparison - Trimix 23/25, GF 50/70', fontsize=18)
-    ax_plot.legend(loc='lower right', fontsize=18, ncol=6)
-    ax_plot.grid(True, alpha=0.3)
-    ax_plot.axhline(y=0, color='lightblue', linewidth=2, alpha=0.5)
-    ax_plot.tick_params(axis='both', labelsize=18)
-    ax_plot.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{abs(y):.0f}"))
-
-    # --- Table ---
-    ax_table.axis('off')
-
-    col_labels = [r['name'] for r in results]
-    row_labels = ([f"{d:.0f}m" for d in bottom_depths]
-                  + [f"{d:.0f}m" for d in all_stop_depths]
-                  + ['OTU', 'CNS%'])
-
-    cell_text = []
-
-    # Bottom depth rows
-    for bd in bottom_depths:
-        row = []
-        for r in results:
-            if r['depth'] == bd:
-                row.append(f"{r['bottom_time']}")
-            else:
-                row.append("-")
-        cell_text.append(row)
-
-    # Deco stop rows
-    for d in all_stop_depths:
-        row = []
-        for r in results:
-            stop_time = next((t for dp, t in r['deco_stops'] if dp == d), None)
-            if stop_time is None:
-                row.append("-")
-            else:
-                rt_info = r['stop_runtimes'].get(d)
-                if rt_info is not None:
-                    row.append(f"{rt_info:.0f} ({stop_time:.0f})")
-                else:
-                    row.append(f"({stop_time:.0f})")
-        cell_text.append(row)
-
-    # OTU and CNS rows
-    cell_text.append([f"{r['otu']:.0f}" for r in results])
-    cell_text.append([f"{r['cns']:.0f}%" for r in results])
-
-    table = ax_table.table(
-        cellText=cell_text,
-        rowLabels=row_labels,
-        colLabels=col_labels,
-        cellLoc='center',
-        loc='center',
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(16)
-    table.scale(1, 1.4)
-
-    # Style the table
-    for (row, col), cell in table.get_celld().items():
-        cell.set_edgecolor('#cccccc')
-        cell.set_linewidth(0.5)
-        if row == 0:
-            cell.set_facecolor('#e6e6e6')
-            cell.set_text_props(weight='bold', fontsize=14)
-        elif col == -1:
-            cell.set_facecolor('#f0f0f0')
-            cell.set_text_props(weight='bold')
-        else:
-            cell.set_facecolor('#ffffff')
-        cell.set_alpha(0.9)
-        cell.PAD = 0.02
-
-    plt.tight_layout()
-    plt.savefig('dive_profiles.png', dpi=150, bbox_inches='tight')
-    print("\nProfile chart saved to: dive_profiles.png")
-    plt.close()
 
 
 def calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4, o2_narcotic=False):
@@ -710,15 +540,19 @@ def _gas_density_gl(o2_pct, he_pct, depth_m, h2_pct=0):
     return (mw_mix * abs_p) / (R * T)
 
 
-def calc_travel_gas_min(sac_bottom, h2_switch_depth, lean_switch_depth,
+def calc_travel_gas_min(sac_bottom, h2_switch_depth, final_gas_switch_depth,
                         descent_rate, ascent_rate, travel_vol, travel_bar,
                         surface_pressure=1.01325):
     """Calculate travel gas consumption and minimum requirement for H2 diving.
 
+    final_gas_switch_depth: switch depth of whichever deco gas the emergency ascent
+        would continue on past h2_switch_depth — the shallowest switch depth among
+        the deco gases actually carried, or 0 (surface, back gas only) if none.
+
     Returns dict with:
     - descent_litres: gas consumed descending to h2_switch_depth
     - descent_remaining_bar: travel gas remaining after descent (per diver)
-    - min_required_bar: minimum travel gas needed (descent + emergency ascent to lean gas × 2 divers)
+    - min_required_bar: minimum travel gas needed (descent + emergency ascent × 2 divers)
     - has_enough: True if travel_bar >= min_required_bar
     """
     # Descent 0m → h2_switch_depth
@@ -728,10 +562,10 @@ def calc_travel_gas_min(sac_bottom, h2_switch_depth, lean_switch_depth,
     descent_time = h2_switch_depth / descent_rate
     descent_litres = sac_bottom * descent_time * avg_p_descent
 
-    # Emergency ascent h2_switch_depth → lean_switch_depth (×2 divers)
-    p_lean = surface_pressure + lean_switch_depth * 0.09985
-    avg_p_ascent = (p_switch + p_lean) / 2.0
-    ascent_time = (h2_switch_depth - lean_switch_depth) / ascent_rate
+    # Emergency ascent h2_switch_depth → final_gas_switch_depth (×2 divers)
+    p_final = surface_pressure + final_gas_switch_depth * 0.09985
+    avg_p_ascent = (p_switch + p_final) / 2.0
+    ascent_time = (h2_switch_depth - final_gas_switch_depth) / ascent_rate
     ascent_litres_per_diver = sac_bottom * ascent_time * avg_p_ascent
 
     min_litres = descent_litres + ascent_litres_per_diver * 2
@@ -746,150 +580,14 @@ def calc_travel_gas_min(sac_bottom, h2_switch_depth, lean_switch_depth,
     }
 
 
-def calculate_deco_switch_depth(o2_pct, max_po2_deco=1.6):
-    """Calculate the maximum switch depth for a deco gas, rounded down to nearest 3m."""
-    o2_frac = o2_pct / 100.0
-    # MOD = (max_po2 / o2_frac) in bar absolute, converted to depth
-    max_depth_bar = max_po2_deco / o2_frac
-    max_depth = (max_depth_bar - SURFACE_PRESSURE) * 10
-    # Round down to nearest 3m (standard stop depths)
-    return int(max_depth / 3) * 3
-
-
-def optimize_deco_gases(depth, bottom_time, back_gas=None, target_end=30,
-                        max_po2_bottom=1.4, max_po2_deco=1.6,
-                        gf_low=None, gf_high=None):
-    """
-    Find the optimal intermediate deco gas (with pure O2 as second gas) that
-    minimizes total runtime for a given depth/bottom time.
-
-    Tries intermediate gases from 35% to 80% O2, each at its MOD.
-    Pure O2 is always the shallow deco gas at 6m.
-
-    Returns:
-        dict with best intermediate gas, switch depths, total runtime comparison
-    """
-    _gf_low = gf_low if gf_low is not None else GF_LOW
-    _gf_high = gf_high if gf_high is not None else GF_HIGH
-
-    # Calculate best back gas for this depth
-    mix = calculate_best_mix(depth, target_end, max_po2_bottom)
-    _back_gas = back_gas if back_gas is not None else (mix['o2'], mix['he'])
-
-    # O2 switch depth (convention: 6m, even though strict MOD is ~5.9m)
-    o2_switch = 6
-
-    results = []
-    for intermediate_o2 in range(35, 85, 5):
-        switch_depth = calculate_deco_switch_depth(intermediate_o2, max_po2_deco)
-        if switch_depth < o2_switch + 3:
-            continue  # no point if switch is at or below O2 depth
-        if switch_depth > depth:
-            continue  # can't switch deeper than the dive
-
-        deco_config = [
-            (intermediate_o2, 0, switch_depth),
-            (100, 0, o2_switch),
-        ]
-
-        try:
-            summary = run_profile(
-                depth, bottom_time,
-                back_gas=_back_gas,
-                deco_cylinders_config=deco_config,
-                gf_low=_gf_low, gf_high=_gf_high,
-            )
-            total_time = summary.runtime + 1.0  # +1 for gas switch stop
-            total_deco = summary.total_deco_time + 1.0  # +1 for gas switch stop
-
-            results.append({
-                'intermediate_o2': intermediate_o2,
-                'switch_depth': switch_depth,
-                'o2_switch_depth': o2_switch,
-                'total_time': total_time,
-                'total_deco': total_deco,
-            })
-        except Exception:
-            continue
-
-    if not results:
-        return None
-
-    # Sort by total runtime
-    results.sort(key=lambda r: r['total_time'])
-    best = results[0]
-
-    return {
-        'back_gas': _back_gas,
-        'best_intermediate': best['intermediate_o2'],
-        'intermediate_switch': best['switch_depth'],
-        'o2_switch': best['o2_switch_depth'],
-        'total_time': best['total_time'],
-        'total_deco': best['total_deco'],
-        'all_results': results,
-        'depth': depth,
-        'bottom_time': bottom_time,
-    }
-
-
-def print_gas_optimization(depth, bottom_time, target_end=30,
-                           max_po2_bottom=1.4, max_po2_deco=1.6,
-                           back_gas=None):
-    """Print best mix and optimized deco gases for a given depth/bottom time.
-
-    Args:
-        back_gas: (o2, he) tuple to fix the back gas blend. If None, calculates optimal.
-    """
-    mix = calculate_best_mix(depth, target_end, max_po2_bottom)
-    _back_gas = back_gas if back_gas is not None else (mix['o2'], mix['he'])
-    opt = optimize_deco_gases(depth, bottom_time, back_gas=_back_gas,
-                              target_end=target_end,
-                              max_po2_bottom=max_po2_bottom,
-                              max_po2_deco=max_po2_deco)
-
-    print(f"\n{'='*60}")
-    print(f"  GAS OPTIMIZATION: {depth}m / {bottom_time} min | END <= {target_end}m")
-    print(f"{'='*60}")
-    if back_gas:
-        # Show fixed gas info
-        ambient_bar = SURFACE_PRESSURE + depth / 10.0
-        po2 = ambient_bar * (back_gas[0] / 100.0)
-        he_frac = back_gas[1] / 100.0
-        end = (depth + 10) * (1 - he_frac) - 10
-        print(f"\n  Fixed back gas:  Tx {back_gas[0]}/{back_gas[1]}")
-        print(f"    PO2 at {depth}m: {po2:.2f} bar")
-        print(f"    END: {end:.0f}m")
-    else:
-        print(f"\n  Best back gas:  Tx {mix['o2']}/{mix['he']}")
-        print(f"    O2: {mix['o2']}%  He: {mix['he']}%  N2: {mix['n2']}%")
-        print(f"    PO2 at {depth}m: {mix['po2_at_depth']:.2f} bar")
-        print(f"    END: {mix['end']:.0f}m")
-
-    if opt:
-        print(f"\n  Optimal deco gases:")
-        print(f"    Intermediate: EAN{opt['best_intermediate']} @ {opt['intermediate_switch']}m")
-        print(f"    Shallow:      O2 @ {opt['o2_switch']}m")
-        print(f"    Total deco:   {opt['total_deco']:.0f} min")
-        print(f"    Total runtime: {opt['total_time']:.1f} min")
-
-        print(f"\n  All intermediate options tested:")
-        print(f"    {'Gas':<8} {'Switch':>7} {'Deco':>7} {'Runtime':>8}")
-        print(f"    {'-'*8} {'-'*7} {'-'*7} {'-'*8}")
-        for r in opt['all_results']:
-            marker = " ◄" if r['intermediate_o2'] == opt['best_intermediate'] else ""
-            print(f"    EAN{r['intermediate_o2']:<4} {r['switch_depth']:>5}m"
-                  f" {r['total_deco']:>5.0f}m {r['total_time']:>7.1f}m{marker}")
-    print()
-
-
 def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         back_gas_pressure=None, deco_50_pressure=None,
                         deco_o2_pressure=None,
                         back_gas_vol=None, deco_50_vol=None, deco_o2_vol=None,
                         gf_low=None, gf_high=None, descent_rate=None,
                         ascent_rate=None, sac_bottom=None, sac_deco=None,
-                        lean_gas=None, lean_switch=None,
-                        rich_gas=None, rich_switch=None,
+                        lean_gas=None, lean_switch=None, lean_enabled=True,
+                        rich_gas=None, rich_switch=None, rich_enabled=True,
                         min_reserve=10,
                         descent_stops=None,
                         gas_switch_time=None,
@@ -953,17 +651,22 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         for s in contingency_scenarios
                     ]
                 else:
-                    # Default hardcoded 8-scenario set
+                    # Default hardcoded scenario set — a "lost X" contingency only makes
+                    # sense for a gas that's actually part of the plan.
                     _scenarios_to_check = [
                         (depth,     mid,     False,  _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
                         (depth,     mid + 3, False,  _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
                         (depth + 3, mid,     False,  _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
                         (depth + 3, mid + 3, False,  _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
-                        (depth,     mid,     'lean', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
-                        (depth,     mid,     'rich', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
-                        (depth + 3, mid + 3, 'lean', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
-                        (depth + 3, mid + 3, 'rich', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco),
                     ]
+                    if lean_enabled:
+                        _scenarios_to_check.append((depth,     mid,     'lean', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco))
+                    if rich_enabled:
+                        _scenarios_to_check.append((depth,     mid,     'rich', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco))
+                    if lean_enabled:
+                        _scenarios_to_check.append((depth + 3, mid + 3, 'lean', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco))
+                    if rich_enabled:
+                        _scenarios_to_check.append((depth + 3, mid + 3, 'rich', _gf_low, _gf_high, _ascent_rate, _sac_bottom, _sac_deco))
                 ok = True
                 for d, bt, lost, s_gfl, s_gfh, s_ar, s_sb, s_sd in _scenarios_to_check:
                     r = run_scenario("test", d, bt, deco_gases_lost=lost,
@@ -974,8 +677,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                      back_gas_vol=_back_gas_vol,
                                      deco_50_vol=_deco_50_vol,
                                      deco_o2_vol=_deco_o2_vol,
-                                     lean_gas=_lean_gas, lean_switch=_lean_switch,
-                                     rich_gas=_rich_gas, rich_switch=_rich_switch,
+                                     lean_gas=_lean_gas, lean_switch=_lean_switch, lean_enabled=lean_enabled,
+                                     rich_gas=_rich_gas, rich_switch=_rich_switch, rich_enabled=rich_enabled,
                                      gf_low=s_gfl, gf_high=s_gfh,
                                      descent_rate=_descent_rate, ascent_rate=s_ar,
                                      sac_bottom=s_sb, sac_deco=s_sd,
@@ -986,10 +689,10 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         ok = False
                         break
                     lost_list = lost if isinstance(lost, list) else []
-                    if lost not in (True, 'lean') and 'lean' not in lost_list and r['lean_remaining_bar'] < min_reserve:
+                    if lean_enabled and lost not in (True, 'lean') and 'lean' not in lost_list and r['lean_remaining_bar'] < min_reserve:
                         ok = False
                         break
-                    if lost not in (True, 'rich') and 'rich' not in lost_list and r['rich_remaining_bar'] < min_reserve:
+                    if rich_enabled and lost not in (True, 'rich') and 'rich' not in lost_list and r['rich_remaining_bar'] < min_reserve:
                         ok = False
                         break
             else:
@@ -1001,8 +704,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                  back_gas_vol=_back_gas_vol,
                                  deco_50_vol=_deco_50_vol,
                                  deco_o2_vol=_deco_o2_vol,
-                                 lean_gas=_lean_gas, lean_switch=_lean_switch,
-                                 rich_gas=_rich_gas, rich_switch=_rich_switch,
+                                 lean_gas=_lean_gas, lean_switch=_lean_switch, lean_enabled=lean_enabled,
+                                 rich_gas=_rich_gas, rich_switch=_rich_switch, rich_enabled=rich_enabled,
                                  gf_low=_gf_low, gf_high=_gf_high,
                                  descent_rate=_descent_rate, ascent_rate=_ascent_rate,
                                  sac_bottom=_sac_bottom, sac_deco=_sac_deco,
@@ -1017,420 +720,3 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
         except Exception:
             hi = mid - 1
     return best
-
-
-def generate_planning_table(depth, back_gas=None, bottom_time=None,
-                            max_po2_deco=1.6, target_end=30,
-                            back_gas_pressure=None, deco_50_pressure=None,
-                            deco_o2_pressure=None,
-                            gf_low=None, gf_high=None,
-                            descent_rate=None, ascent_rate=None,
-                            sac_bottom=None, sac_deco=None,
-                            descent_stop_depth=None, descent_stop_time=5.0,
-                            csv_path=None):
-    """
-    Generate a complete planning table for a given depth.
-
-    Finds max bottom time T (rule of thirds), then produces scenarios:
-    - D, T (main plan)
-    - D, T+3
-    - D+3, T
-    - D+3, T+3
-    - D, T no 50%
-    - D, T no O2
-    - D+3, T+3 no 50%
-    - D+3, T+3 no O2
-    - Bounce (5 min at D)
-
-    Prints the table and minimum fills.
-    """
-    _back_gas = back_gas if back_gas is not None else BACK_GAS
-    _back_h2 = _back_gas[2] if len(_back_gas) > 2 else 0
-    _back_gas_pressure = back_gas_pressure if back_gas_pressure is not None else BACK_GAS_PRESSURE
-    _deco_50_pressure = deco_50_pressure if deco_50_pressure is not None else DECO_50_PRESSURE
-    _deco_o2_pressure = deco_o2_pressure if deco_o2_pressure is not None else DECO_O2_PRESSURE
-    _gf_low = gf_low if gf_low is not None else GF_LOW
-    _gf_high = gf_high if gf_high is not None else GF_HIGH
-    _descent_rate = descent_rate if descent_rate is not None else DESCENT_RATE
-    _ascent_rate = ascent_rate if ascent_rate is not None else ASCENT_RATE
-    _sac_bottom = sac_bottom if sac_bottom is not None else SAC_BOTTOM
-    _sac_deco = sac_deco if sac_deco is not None else SAC_DECO
-    _descent_stops = [(float(descent_stop_depth), float(descent_stop_time))] if descent_stop_depth is not None else None
-
-    cfg = {
-        'gf_low': _gf_low, 'gf_high': _gf_high,
-        'descent_rate': _descent_rate, 'ascent_rate': _ascent_rate,
-        'sac_bottom': _sac_bottom, 'sac_deco': _sac_deco,
-    }
-
-    # Find max bottom time if not specified
-    if bottom_time is None:
-        T = find_max_bottom_time(depth, _back_gas, back_gas_pressure=_back_gas_pressure,
-                                 deco_50_pressure=_deco_50_pressure,
-                                 deco_o2_pressure=_deco_o2_pressure,
-                                 gf_low=_gf_low, gf_high=_gf_high,
-                                 descent_rate=_descent_rate, ascent_rate=_ascent_rate,
-                                 sac_bottom=_sac_bottom, sac_deco=_sac_deco,
-                                 descent_stops=descent_stops)
-    else:
-        T = bottom_time
-    D = depth
-
-    print(f"\n{'='*70}")
-    print(f"  PLANNING TABLE: {D}m | Tx {_back_gas[0]}/{_back_gas[1]} | ZHL-16C-GF {_gf_low*100:.0f}/{_gf_high*100:.0f}")
-    print(f"  Max bottom time (double ascent): {T}'")
-    print(f"{'='*70}\n")
-
-    # Define scenarios
-    scenarios = [
-        (D,   T,   False, "Main"),
-        (D,   T+3, False, "Longer"),
-        (D+3, T,   False, "Deeper"),
-        (D+3, T+3, False, "D & L"),
-        (D,   T,   'lean', "no lean"),
-        (D,   T,   'rich', "no rich"),
-        (D+3, T+3, 'lean', "no lean"),
-        (D+3, T+3, 'rich', "no rich"),
-        (D,   10, False, "bounce"),
-    ]
-
-    results = []
-    for d, bt, lost, tag in scenarios:
-        name = f"{bt}@{d}" + (f" {tag}" if tag else "")
-        r = run_scenario(name, d, bt, deco_gases_lost=lost,
-                         back_gas=_back_gas,
-                         back_gas_pressure=_back_gas_pressure,
-                         deco_50_pressure=_deco_50_pressure,
-                         deco_o2_pressure=_deco_o2_pressure,
-                         gf_low=_gf_low, gf_high=_gf_high,
-                         descent_rate=_descent_rate, ascent_rate=_ascent_rate,
-                         sac_bottom=_sac_bottom, sac_deco=_sac_deco,
-                         descent_stops=_descent_stops)
-        r['leave_time'] = bt
-        results.append(r)
-
-    from tabulate import tabulate
-
-    # Three-line headers: leave_time / depth / description
-    col_headers = ["\n\n"]
-    for r, (d, bt, lost, tag) in zip(results, scenarios):
-        line2 = f"{d}m"
-        line3 = tag
-        if tag == "bounce":
-            col_headers.append(f"\n{line2}\n{line3}")
-        else:
-            line1 = f"{r['leave_time']}'"
-            col_headers.append(f"{line1}\n{line2}\n{line3}")
-
-    # Build rows
-    rows = []
-
-    # Depth rows showing runtime when leaving bottom
-    depth_set = sorted(set(r['depth'] for r in results), reverse=True)
-    for dd in depth_set:
-        row = [f"{int(dd)}m"]
-        for r in results:
-            if r['depth'] == dd:
-                row.append(f"{r['bottom_time']}")
-            else:
-                row.append("-")
-        rows.append(row)
-
-    # Deco stop rows (prefix with gas marker: - for EAN50, * for O2)
-    all_stop_depths = sorted(
-        set(d for r in results for d, t in r['deco_stops']), reverse=True
-    )
-    for sd in all_stop_depths:
-        # Determine gas at this stop depth
-        if sd <= _DECO_O2_SWITCH_DEPTH:
-            gas_mark = "*"
-        elif sd <= _DECO_50_SWITCH_DEPTH:
-            gas_mark = "-"
-        else:
-            gas_mark = " "
-        row = [f"{gas_mark}{int(sd)}m"]
-        for r in results:
-            stop_time = next((t for dp, t in r['deco_stops'] if dp == sd), None)
-            if stop_time is None:
-                # Check if this gas was lost for this scenario
-                if sd <= _DECO_O2_SWITCH_DEPTH and r.get('deco_gases_lost') in (True, 'o2'):
-                    row.append("-")
-                elif _DECO_O2_SWITCH_DEPTH < sd <= _DECO_50_SWITCH_DEPTH and r.get('deco_gases_lost') in (True, 'ean50'):
-                    row.append("-")
-                else:
-                    row.append("-")
-            else:
-                rt_info = r['stop_runtimes'].get(sd)
-                if rt_info is not None:
-                    row.append(f"{rt_info:.0f} ({stop_time:.0f})")
-                else:
-                    row.append(f"({stop_time:.0f})")
-        rows.append(row)
-
-    rows.append(["*0m"] + [f"{r['total_time']:.0f}" for r in results])
-    rows.append(["---"] + ["---"] * len(results))
-
-    # Summary rows at bottom
-    rows.append(["Depth"] + [r['depth'] for r in results])
-    rows.append(["Total deco"] + [f"{r['total_deco']:.0f}" for r in results])
-    rows.append(["Runtime"] + [f"{r['total_time']:.0f}" for r in results])
-    rows.append(["Turn pressure"] + [f"{r['min_gas']['bar_at_turn']:.0f}" for r in results])
-    rows.append(["---"] + ["---"] * len(results))
-    rows.append(["OTU"] + [f"{r['otu']:.0f}" for r in results])
-    rows.append(["CNS %"] + [f"{r['cns']:.0f}%" for r in results])
-    rows.append(["END"] + [f"{(r['depth']+10)*(1-(_back_gas[1]+_back_h2)/100)-10:.0f}m" for r in results])
-    rows.append(["PO2"] + [f"{(SURFACE_PRESSURE + r['depth']/10)*(_back_gas[0]/100):.2f}" for r in results])
-    rows.append(["Gas density g/L"] + [f"{_gas_density_gl(_back_gas[0], _back_gas[1], r['depth']):.2f}" for r in results])
-    rows.append(["---"] + ["---"] * len(results))
-
-    # End gas remaining
-    rows.append(["Back gas left"] + [f"{r['back_remaining_bar']:.0f}" for r in results])
-    ean50_row = ["EAN50"]
-    for r in results:
-        if r['deco_gases_lost'] in (True, 'ean50'):
-            ean50_row.append("--")
-        else:
-            ean50_row.append(f"{r['ean50_remaining_bar']:.0f}")
-    rows.append(ean50_row)
-    o2_row = ["O2"]
-    for r in results:
-        if r['deco_gases_lost'] in (True, 'o2'):
-            o2_row.append("--")
-        else:
-            o2_row.append(f"{r['o2_remaining_bar']:.0f}")
-    rows.append(o2_row)
-
-    print(tabulate(rows, headers=col_headers, tablefmt="simple", colalign=("left",) + ("right",) * len(results)))
-
-    # Minimum fills: worst case usage for each cylinder across all scenarios
-    max_back_litres = 0
-    max_50_litres = 0
-    max_o2_litres = 0
-    for r in results:
-        back_used_bar = _back_gas_pressure - r['back_remaining_bar']
-        back_used_l = back_used_bar * BACK_GAS_VOL
-        if back_used_l > max_back_litres:
-            max_back_litres = back_used_l
-        if r['deco_gases_lost'] not in (True, 'ean50'):
-            e50_used_bar = _deco_50_pressure - r['ean50_remaining_bar']
-            e50_used_l = e50_used_bar * DECO_50_VOL
-            if e50_used_l > max_50_litres:
-                max_50_litres = e50_used_l
-        if r['deco_gases_lost'] not in (True, 'o2'):
-            o2_used_bar = _deco_o2_pressure - r['o2_remaining_bar']
-            o2_used_l = o2_used_bar * DECO_O2_VOL
-            if o2_used_l > max_o2_litres:
-                max_o2_litres = o2_used_l
-
-    max_back_bar = max_back_litres / BACK_GAS_VOL
-    deco_cyls = [(11.1, "11.1L"), (10.3, "10.3L"), (5.7, "5.7L")]
-
-    def deco_fill_str(litres, name):
-        bar_strs = [f"{litres/vol:.0f}bar {label}" for vol, label in deco_cyls]
-        return f"    {name}: {litres:.0f}L ({', '.join(bar_strs)})"
-
-    print(f"\n  MINIMUM FILLS (worst case):")
-    print(f"    Back gas Tx {_back_gas[0]}/{_back_gas[1]}: {max_back_litres:.0f}L ({max_back_bar:.0f} bar)")
-    print(deco_fill_str(max_50_litres, "EAN50"))
-    print(deco_fill_str(max_o2_litres, "O2"))
-
-    print(f"\n  ASSUMPTIONS:")
-    print(f"    SAC: {_sac_bottom} L/min (bottom), {_sac_deco} L/min (deco)")
-    print(f"    Descent: {_descent_rate} m/min, Ascent: {_ascent_rate} m/min")
-    if _descent_stops:
-        for ds_depth, ds_time in _descent_stops:
-            print(f"    Descent stop: {ds_time:.0f} min @ {ds_depth:.0f}m (S-drill)")
-    print(f"    Cylinders: back {BACK_GAS_VOL}L @ {_back_gas_pressure} bar, "
-          f"EAN50 {DECO_50_VOL}L @ {_deco_50_pressure} bar, "
-          f"O2 {DECO_O2_VOL}L @ {_deco_o2_pressure} bar")
-    print(f"    Deco switches: EAN50 @ {_DECO_50_SWITCH_DEPTH}m, O2 @ {_DECO_O2_SWITCH_DEPTH}m")
-    print(f"    Last stop: 3m (deco stops) / {_DECO_O2_SWITCH_DEPTH}m (O2 switch)")
-    print(f"    Min gas: 2-diver, 1 min problem-solving at depth")
-    hot_factor = (273.15 + FILL_TEMP_C) / (273.15 + WATER_TEMP_C)
-    print(f"    Hot fill ({FILL_TEMP_C}degC -> {WATER_TEMP_C}degC): "
-          f"back {_back_gas_pressure * hot_factor:.0f} bar, "
-          f"EAN50 {_deco_50_pressure * hot_factor:.0f} bar, "
-          f"O2 {_deco_o2_pressure * hot_factor:.0f} bar")
-    print()
-
-    if csv_path is not None:
-        import csv as _csv
-        csv_rows = []
-        csv_rows.append([f"PLANNING TABLE: {D}m | Tx {_back_gas[0]}/{_back_gas[1]} | ZHL-16C-GF {_gf_low*100:.0f}/{_gf_high*100:.0f}"])
-        csv_rows.append([f"Max bottom time (double ascent): {T}'"])
-        csv_rows.append([])
-        csv_rows.append([""] + [f"{r['leave_time']}'" if tag != "bounce" else "" for r, (_, _, _, tag) in zip(results, scenarios)])
-        csv_rows.append([""] + [f"{d}m" for d, _, _, _ in scenarios])
-        csv_rows.append([""] + [tag for _, _, _, tag in scenarios])
-        csv_rows.append([])
-        depth_set_csv = sorted(set(r['depth'] for r in results), reverse=True)
-        for dd in depth_set_csv:
-            row = [f"{int(dd)}m"]
-            for r in results:
-                row.append(r['bottom_time'] if r['depth'] == dd else "")
-            csv_rows.append(row)
-        all_stop_depths_csv = sorted(
-            set(d for r in results for d, t in r['deco_stops']), reverse=True
-        )
-        for sd in all_stop_depths_csv:
-            if sd <= _DECO_O2_SWITCH_DEPTH:
-                label = f"*{int(sd)}m"
-            elif sd <= _DECO_50_SWITCH_DEPTH:
-                label = f"-{int(sd)}m"
-            else:
-                label = f"{int(sd)}m"
-            row = [label]
-            for r in results:
-                stop_time = next((t for dp, t in r['deco_stops'] if dp == sd), None)
-                if stop_time is None:
-                    row.append("")
-                else:
-                    rt_info = r['stop_runtimes'].get(sd)
-                    if rt_info is not None:
-                        row.append(f"{rt_info:.0f} ({stop_time:.0f})")
-                    else:
-                        row.append(f"({stop_time:.0f})")
-            csv_rows.append(row)
-        csv_rows.append(["*0m"] + [f"{r['total_time']:.0f}" for r in results])
-        csv_rows.append([])
-        csv_rows.append(["Depth"] + [r['depth'] for r in results])
-        csv_rows.append(["Total deco"] + [f"{r['total_deco']:.0f}" for r in results])
-        csv_rows.append(["Runtime"] + [f"{r['total_time']:.0f}" for r in results])
-        csv_rows.append(["Turn pressure"] + [f"{r['min_gas']['bar_at_turn']:.0f}" for r in results])
-        csv_rows.append([])
-        csv_rows.append(["OTU"] + [f"{r['otu']:.0f}" for r in results])
-        csv_rows.append(["CNS %"] + [f"{r['cns']:.0f}%" for r in results])
-        csv_rows.append(["END"] + [f"{(r['depth']+10)*(1-(_back_gas[1]+_back_h2)/100)-10:.0f}m" for r in results])
-        csv_rows.append(["PO2"] + [f"{(SURFACE_PRESSURE + r['depth']/10)*(_back_gas[0]/100):.2f}" for r in results])
-        csv_rows.append(["Gas density g/L"] + [f"{_gas_density_gl(_back_gas[0], _back_gas[1], r['depth']):.2f}" for r in results])
-        csv_rows.append([])
-        csv_rows.append(["Back gas left"] + [f"{r['back_remaining_bar']:.0f}" for r in results])
-        csv_rows.append(["EAN50"] + [
-            "--" if r['deco_gases_lost'] in (True, 'ean50') else f"{r['ean50_remaining_bar']:.0f}"
-            for r in results])
-        csv_rows.append(["O2"] + [
-            "--" if r['deco_gases_lost'] in (True, 'o2') else f"{r['o2_remaining_bar']:.0f}"
-            for r in results])
-        csv_rows.append([])
-        max_back_litres_csv = max(
-            (_back_gas_pressure - r['back_remaining_bar']) * BACK_GAS_VOL for r in results)
-        max_50_litres_csv = max(
-            (_deco_50_pressure - r['ean50_remaining_bar']) * DECO_50_VOL
-            for r in results if r['deco_gases_lost'] not in (True, 'ean50'))
-        max_o2_litres_csv = max(
-            (_deco_o2_pressure - r['o2_remaining_bar']) * DECO_O2_VOL
-            for r in results if r['deco_gases_lost'] not in (True, 'o2'))
-        csv_rows.append(["MIN FILLS"])
-        csv_rows.append([f"Back gas Tx {_back_gas[0]}/{_back_gas[1]}",
-                         f"{max_back_litres_csv:.0f}L",
-                         f"{max_back_litres_csv / BACK_GAS_VOL:.0f} bar"])
-        csv_rows.append(["EAN50", f"{max_50_litres_csv:.0f}L",
-                         f"{max_50_litres_csv/11.1:.0f}bar 11.1L",
-                         f"{max_50_litres_csv/10.3:.0f}bar 10.3L",
-                         f"{max_50_litres_csv/5.7:.0f}bar 5.7L"])
-        csv_rows.append(["O2", f"{max_o2_litres_csv:.0f}L",
-                         f"{max_o2_litres_csv/11.1:.0f}bar 11.1L",
-                         f"{max_o2_litres_csv/10.3:.0f}bar 10.3L",
-                         f"{max_o2_litres_csv/5.7:.0f}bar 5.7L"])
-        csv_rows.append([])
-        csv_rows.append(["ASSUMPTIONS"])
-        csv_rows.append(["SAC", f"{_sac_bottom} L/min (bottom)", f"{_sac_deco} L/min (deco)"])
-        csv_rows.append(["Descent", f"{_descent_rate} m/min"])
-        csv_rows.append(["Ascent", f"{_ascent_rate} m/min"])
-        if _descent_stops:
-            for ds_depth, ds_time in _descent_stops:
-                csv_rows.append(["Descent stop", f"{ds_time:.0f} min @ {ds_depth:.0f}m (S-drill)"])
-        csv_rows.append(["Cylinders",
-                         f"back {BACK_GAS_VOL}L @ {_back_gas_pressure} bar",
-                         f"EAN50 {DECO_50_VOL}L @ {_deco_50_pressure} bar",
-                         f"O2 {DECO_O2_VOL}L @ {_deco_o2_pressure} bar"])
-        csv_rows.append(["Deco switches", f"EAN50 @ {_DECO_50_SWITCH_DEPTH}m", f"O2 @ {_DECO_O2_SWITCH_DEPTH}m"])
-        csv_rows.append(["Last stop", "3m (deco stops)", f"{_DECO_O2_SWITCH_DEPTH}m (O2 switch)"])
-        csv_rows.append(["Min gas", "2-diver", "1 min problem-solving at depth"])
-        hot_factor_csv = (273.15 + FILL_TEMP_C) / (273.15 + WATER_TEMP_C)
-        csv_rows.append([f"Hot fill ({FILL_TEMP_C}degC -> {WATER_TEMP_C}degC)",
-                         f"back {_back_gas_pressure * hot_factor_csv:.0f} bar",
-                         f"EAN50 {_deco_50_pressure * hot_factor_csv:.0f} bar",
-                         f"O2 {_deco_o2_pressure * hot_factor_csv:.0f} bar"])
-        filename = csv_path if csv_path is not True else f"plan_{D}m_Tx{_back_gas[0]}_{_back_gas[1]}.csv"
-        with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
-            _csv.writer(f).writerows(csv_rows)
-        print(f"  Exported: {filename}")
-
-    return results
-
-
-
-def generate_all_plans():
-    """Generate planning tables for multiple depths with best mix, export to CSV."""
-    plans = [
-        (40, None, 30),    # best mix for END 30
-        (45, (22, 27), None),  # fixed mix - already filled
-        (50, None, 30),    # best mix for END 30
-        (55, None, 30),    # best mix for END 30
-        (60, None, 30),    # best mix for END 30
-    ]
-
-    print("=" * 70)
-    print("  GENERATING PLANNING TABLES")
-    print("=" * 70)
-
-    for depth, fixed_gas, target_end in plans:
-        if fixed_gas:
-            back_gas = fixed_gas
-            print(f"\n  {depth}m: Using fixed Tx {back_gas[0]}/{back_gas[1]}")
-        else:
-            mix = calculate_best_mix(depth, target_end=target_end)
-            back_gas = (mix['o2'], mix['he'])
-            print(f"\n  {depth}m: Best mix Tx {mix['o2']}/{mix['he']} "
-                  f"(END={mix['end']:.0f}m, PO2={mix['po2_at_depth']:.2f})")
-
-        generate_planning_table(depth, back_gas=back_gas, csv_path=True)
-
-    print(f"\n{'=' * 70}")
-    print("  All plans exported to CSV files.")
-    print("=" * 70)
-
-
-def main():
-    print("Dive Plan - Trimix 23/25 | GF 50/70")
-    print(f"Back gas: {BACK_GAS_VOL}L @ {BACK_GAS_PRESSURE} bar | "
-          f"EAN50: {DECO_50_VOL}L @ {DECO_50_PRESSURE} bar | "
-          f"O2: {DECO_O2_VOL}L @ {DECO_O2_PRESSURE} bar")
-    print(f"Descent: {DESCENT_RATE} m/min | Ascent: {ASCENT_RATE} m/min")
-    print(f"SAC: {SAC_BOTTOM} L/min (bottom) / {SAC_DECO} L/min (deco)")
-    print()
-
-    scenarios = [
-        ("27@45", 45, 27, False),
-        ("30@45", 45, 30, False),
-        ("27@48", 48, 27, False),
-        ("30@48", 48, 30, False),
-        ("10@45", 45, 10, False),
-        ("27@45\nno 50", 45, 27, 'ean50'),
-        ("30@45\nno 50", 45, 30, 'ean50'),
-        ("27@48\nno 50", 48, 27, 'ean50'),
-        ("30@48\nno 50", 48, 30, 'ean50'),
-        ("27@45\nno O2", 45, 27, 'o2'),
-        ("30@45\nno O2", 45, 30, 'o2'),
-        ("27@48\nno O2", 48, 27, 'o2'),
-        ("30@48\nno O2", 48, 30, 'o2'),
-        ("27@45\nno deco", 45, 27, True),
-        ("10@45\nturn", 45, 10, False),
-    ]
-
-    results = []
-    for name, depth, bt, lost in scenarios:
-        r = run_scenario(name, depth, bt, deco_gases_lost=lost)
-        results.append(r)
-
-    print_table(results)
-    plot_profiles(results)
-
-    # Gas optimization for the main dive depths
-    for depth in [45, 48]:
-        print_gas_optimization(depth, 27, target_end=30)
-
-
-if __name__ == '__main__':
-    main()

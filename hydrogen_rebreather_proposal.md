@@ -108,14 +108,14 @@ Therefore: O₂ fraction in loop must be < ~4% while H₂ is present
 
 This creates a **ppO₂ window problem** on ascent:
 
-| Depth | p_amb | ppO₂ at 4% O₂ | Safe for breathing? |
-|-------|-------|----------------|---------------------|
-| 150 m | 16.0 bar | 0.64 bar | ✓ (good) |
-| 100 m | 11.0 bar | 0.44 bar | ✓ (acceptable) |
-| 50 m  | 6.0 bar  | 0.24 bar | ⚠️ (marginal — above the absolute 0.18 bar floor, but most CCR practitioners set their working floor at 0.3–0.4 bar due to exertion, cold, and CO₂ loading effects) |
-| 30 m  | 4.0 bar  | 0.16 bar | ✗ (hypoxic) |
-| 15 m  | 2.5 bar  | 0.10 bar | ✗ (severely hypoxic) |
-| 0 m   | 1.0 bar  | 0.04 bar | ✗ (lethal) |
+| Depth | p_amb    | ppO₂ at 4% O₂ | Safe for breathing? |
+|-------|----------|---------------|---------------------|
+| 150 m | 16.0 bar | 0.64 bar      | ✓ (good)            |
+| 100 m | 11.0 bar | 0.44 bar      | ✓ (acceptable)      |
+| 50 m  | 6.0 bar  | 0.24 bar      | ⚠️ (marginal — above the absolute 0.18 bar floor, but most CCR practitioners set their working floor at 0.3–0.4 bar due to exertion, cold, and CO₂ loading effects) |
+| 30 m  | 4.0 bar  | 0.16 bar      | ✗ (hypoxic)        |
+| 15 m  | 2.5 bar  | 0.10 bar      | ✗ (severely hypoxic) |
+| 0 m   | 1.0 bar  | 0.04 bar      | ✗ (lethal)         |
 
 The H₂ **must** be removed from the loop before the diver reaches ~40 m, or the O₂ fraction must be increased — which is only safe once H₂ is below 4% by volume.
 

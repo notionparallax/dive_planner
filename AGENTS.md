@@ -9,8 +9,8 @@ This document is for AI coding agents and developers who need to understand the 
 ```mermaid
 treeView-beta
 c:\repos\dive_planner\
-├── streamlit_app.py      # Streamlit web UI (~1013 lines)
-├── dive_plan.py          # Core planning engine (~1050 lines)
+├── streamlit_app.py      # Streamlit web UI (~1060 lines)
+├── dive_plan.py          # Core planning engine (~700 lines)
 ├── gas_planning.py       # Pure gas calculation helpers
 ├── api.py                # FastAPI REST backend (not used by Streamlit deployment)
 ├── optimiser.py          # Binary search + grid search for API path
@@ -64,6 +64,8 @@ Two call paths:
 
 Return dict keys: `name`, `depth`, `bottom_time`, `total_time`, `total_deco`, `deco_stops`, `times`, `depths`, `back_remaining_bar`, `lean_remaining_bar`, `rich_remaining_bar`, `travel_remaining_bar`, `gas_used`, `min_gas`, `max_gas_density`, `otu`, `cns`, `icd_warnings`, `ceiling_profile`, `gas_pressure_profile`.
 
+`min_gas` (both paths) comes from `calculate_min_gas_and_turn_from_summary()` — the single implementation of open-water minimum-gas/turn-pressure math. Pass `emergency_sac` to `run_scenario()` to compute it at a stressed SAC rate instead of the planned `sac_bottom` (used by the optimiser; the Streamlit app doesn't pass it, so its numbers are unchanged).
+
 #### `find_max_bottom_time(depth, back_gas, gas_rule='double_ascent', ..., min_reserve=10, descent_stops=None) → int`
 
 Binary search (lo=1, hi=120 minutes, 1-minute steps). At each candidate time, runs all 8 contingency scenarios. If any cylinder in any scenario drops below `min_reserve`, that time fails.
@@ -71,10 +73,6 @@ Binary search (lo=1, hi=120 minutes, 1-minute steps). At each candidate time, ru
 **`min_reserve` is the minimum gas reserve in bar (from the UI's "Minimum gas reserve" setting).**
 
 The function returns an integer (whole minutes) — auto bottom time always snaps to whole minutes.
-
-#### `generate_planning_table(depth, ...) → prints table`
-
-CLI utility. Runs the same 10 scenarios and prints to stdout. Pass `descent_stops=` here too.
 
 #### `calculate_best_mix(depth, target_end=30, max_po2_bottom=1.4, o2_narcotic=False) → dict`
 
@@ -91,10 +89,10 @@ Ideal-gas density in g/L at 37°C using real molar masses.
 Pure functions, no UI or decotengu dependency (except `CylinderConfig`, `SURFACE_PRESSURE` from `dive_plan`).
 
 - `calc_switch_depth(o2_frac, max_ppo2=1.6)` → MOD in whole metres. Uses 1.01325 bar surface pressure (EAN50 → 21m, not 22m). Pure O2 clamped to 6m by convention.
-- `calc_ow_min_gas(steps, depth, cylinder, emergency_sac=30, ...)` → OW min gas standard: 1 min problem-solving + back-gas ascent × 2 divers.
-- `calc_cave_deco_min_gas(steps, cylinder, ...)` → Cave deco min gas: 2× gas used on ascent with that cylinder.
 - `calc_cave_turn_pressure(fill_pressure_bar, ...)` → Rule-of-thirds turn pressure.
-- `calc_gas_plan(steps, depth, back_cylinder, deco_cylinders, dive_mode, ...)` → Orchestrator, returns full gas plan dict.
+- `calc_gas_plan(min_gas, back_cylinder, deco_cylinders_with_depths, dive_mode, ...)` → Orchestrator; reports the already-computed `min_gas` dict for open water (doesn't recompute it — see below) or `calc_cave_turn_pressure` for cave, plus each deco cylinder's known switch depth.
+
+There used to be `calc_ow_min_gas(steps, ...)` and `calc_cave_deco_min_gas(steps, ...)` here, independently recomputing open-water/cave-deco minimum gas from a per-step dive trace (`steps`). Removed: `decodaitengu.plan_dive()` has never returned a `steps` trace (only aggregate `profile`/`gas_usage`), so `run_scenario()`'s `cfg=` path always passed `steps=None` and `calc_gas_plan()` silently skipped the whole check — `optimiser.optimise_bottom_time()` could report a plan `feasible` with the back gas cylinder empty. Fixed by deleting that dead path and making `calc_gas_plan()` read the `min_gas` dict `run_scenario()` already computes (see above) instead of recomputing it. Cave-mode deco-gas minimum gas has no replacement — it needs a per-depth ascent gas-usage breakdown nothing in this codebase produces — so `calc_gas_plan()` only reports switch depths for cave-mode deco gases, not a min-gas figure.
 
 ---
 
@@ -131,14 +129,17 @@ Full list:
 | `h2_bg` | int | 0 | Back gas H2% (H2 mode only) |
 | `bgp` | int | 230 | Back gas fill bar |
 | `bgv` | float | 24.4 | Back gas volume (L) |
+| `lean_on` | bool | 1 | Lean gas carried (adds/removes the Lean row + deco gas) |
 | `lo2` | int | 50 | Lean gas O2% |
 | `lhe` | int | 0 | Lean gas He% |
 | `lp` | int | 200 | Lean gas fill bar |
 | `lv` | float | 11.1 | Lean gas volume (L) |
+| `rich_on` | bool | 1 | Rich gas carried (adds/removes the Rich row + deco gas) |
 | `ro2` | int | 100 | Rich gas O2% |
 | `rhe` | int | 0 | Rich gas He% |
 | `rp` | int | 200 | Rich gas fill bar |
 | `rv` | float | 11.1 | Rich gas volume (L) |
+| `units` | str | metric | Display units: `metric` or `imperial` — display-only, all internal calc stays metric |
 | `tv_o2` | int | 21 | Travel gas O2% |
 | `tv_he` | int | 0 | Travel gas He% |
 | `tv_bar` | int | 230 | Travel gas fill bar |
@@ -242,7 +243,7 @@ Streamlit Cloud caches the environment. A version bump in `requirements.txt` onl
 
 ### 3. `descent_stops` must be passed everywhere
 
-`find_max_bottom_time()`, `run_scenario()`, and `generate_planning_table()` all accept `descent_stops`. Forgetting to pass it means the auto timer ignores the S-drill stop, underestimating gas consumption.
+`find_max_bottom_time()` and `run_scenario()` both accept `descent_stops`. Forgetting to pass it means the auto timer ignores the S-drill stop, underestimating gas consumption.
 
 ### 4. `o2_narc` ordering in sidebar
 
@@ -260,13 +261,15 @@ The `cfg=` path (API) and the non-cfg path (Streamlit) have different gas labell
 
 Uses 1.01325 bar (not 1.0 bar), so EAN50 MOD is 21m not 22m. Pure O2 is clamped to 6m by convention even though strict MOD is ~5.9m.
 
-### 8. Gas switch at stops only
+### 8. Descent rate matters a lot when comparing against Subsurface
 
-The library switches gas only at scheduled deco stops, not during free ascent from depth to first stop. This makes plans slightly more conservative than software that switches on the way up.
+`decodaitengu` does switch gas during free ascent (not just at scheduled stops — see `_ascend_with_deco` in `c:\repos\decotengu\decodaitengu\planning.py`), so that's not a source of divergence. An earlier check here claimed this app's total deco ran ~10-20% shorter than Subsurface's — that number was wrong, produced by comparing at this app's default 20 m/min descent rate instead of the much faster one Subsurface's plans in `subsurface_test_plans.txt` imply (both their 50m and 60m dives show a 1-minute descent, i.e. ~45-60 m/min). Re-run with a matched fast descent rate and ascent_rate=10 (which already matched well): all three test plans land within 1-3 minutes of total deco and within a minute of runtime, and the gap isn't one-directional — test 3 (60m, 18/45) comes out 1 minute *longer* than Subsurface, not shorter. What's left concentrates in single 1-minute stops right at a gas-switch depth (21m, 18m), consistent with rounding-boundary sensitivity rather than a wrong M-value/GF calc. If you're validating a specific plan against Subsurface, match the descent rate first before concluding there's a real gap.
 
 ### 9. H2 mode
 
 Triggered when back gas O2 < 4%. Adds Travel gas row, H2 switch depth input, and prominent warning banner. H2 coefficients are unvalidated — for research only.
+
+`back_gas` in `streamlit_app.py` is always the 3-tuple `(o2, he, h2)`. Any narcotic-fraction calc (END row, Best Mix Calculator, etc.) must exclude `back_gas[2]` (H2) the same way it excludes He — H2 is not narcotic. The live END row was missing this until it was fixed to match the H2 exclusion already applied to helium.
 
 ---
 
@@ -279,11 +282,13 @@ cd c:\repos\dive_planner
 
 The `.venv` has `decodaitengu` installed editable from `c:\repos\decotengu` (`pip install -e`).
 
-To test a specific function from the CLI:
+To exercise a specific function from the CLI without the UI, e.g.:
 
 ```bash
-.venv\Scripts\python.exe run_50m_230.py
+.venv\Scripts\python.exe -c "import dive_plan; print(dive_plan.run_scenario('test', 45, 20, back_gas=(21, 0))['deco_stops'])"
 ```
+
+There is no standalone CLI planner script — the pre-Streamlit `dive_plan.py` CLI/plotting code (`print_table`, `plot_profiles`, `generate_planning_table`, `main`) and the scripts that drove it (`run_50m_230.py`, `compare_narcosis_models.py`) were removed; `streamlit_app.py` is the only entry point now.
 
 ---
 

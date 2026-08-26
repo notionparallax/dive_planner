@@ -131,8 +131,9 @@ Every setting is encoded in the URL, making dive plans fully shareable. Key para
 | `auto_time` | Auto bottom time on/off | 1 |
 | `o2`, `he` | Back gas mix | 21, 0 |
 | `bgp`, `bgv` | Back gas pressure (bar) and volume (L) | 230, 24.4 |
-| `lo2`, `lhe`, `lp`, `lv` | Lean gas mix, pressure, volume | 50, 0, 200, 11.1 |
-| `ro2`, `rhe`, `rp`, `rv` | Rich gas mix, pressure, volume | 100, 0, 200, 11.1 |
+| `lean_on`, `lo2`, `lhe`, `lp`, `lv` | Lean gas on/off, mix, pressure, volume | 1, 50, 0, 200, 11.1 |
+| `rich_on`, `ro2`, `rhe`, `rp`, `rv` | Rich gas on/off, mix, pressure, volume | 1, 100, 0, 200, 11.1 |
+| `units` | Display units: `metric` or `imperial` | metric |
 | `gfl`, `gfh` | GF low and high (%) | 50, 80 |
 | `dr`, `ar`, `ar_s` | Descent rate, deep/shallow ascent rates | 20, 10, 3.0 |
 | `sdrill`, `sd`, `st` | S-drill on/off, depth (m), time (min) | 0, 5, 1 |
@@ -149,7 +150,7 @@ Full parameter list is in [AGENTS.md](AGENTS.md).
 
 Uses **decodaitengu** (`decodaitengu>=1.4.0`), implementing Bühlmann ZHL-16C with gradient factors.
 
-**Known limitation:** Gas switches occur only at scheduled deco stops, not during free ascent from depth to first stop. Plans are slightly more conservative than some other software (e.g. Subsurface).
+**Known limitation:** Spot-checks against Subsurface (same depth/time/GF/SAC, and a descent rate fast enough to match the ~1-minute descents in Subsurface's plans) land within 1-3 minutes on total deco time and within a minute on runtime — see `subsurface_test_plans.txt` for the reference plans. The gap isn't one-directional (this planner comes out shorter in some cases, longer in others), and what's there concentrates in single 1-minute stops right at a gas-switch depth (21m, 18m) — a rounding-boundary sensitivity, not a systematic under- or over-call. An earlier version of this note claimed a 10-20% shortfall; that number came from comparing at this app's default 20 m/min descent rate rather than the much faster one Subsurface's plans imply, which inflated the apparent gap.
 
 H2 (hydrogen) support is experimental with unvalidated coefficients — do not use for real dives.
 
@@ -162,6 +163,4 @@ decodaitengu>=1.4.0
 streamlit>=1.32
 plotly>=5.20
 pandas>=2.0
-tabulate>=0.9
-matplotlib>=3.8
 ```

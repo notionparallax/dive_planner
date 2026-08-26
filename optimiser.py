@@ -4,12 +4,16 @@ Bottom time optimiser: binary search over bottom time for fixed gas mixes.
 from dive_plan import run_scenario, GasConfig, CylinderConfig
 from gas_planning import calc_gas_plan, calc_switch_depth
 
-def check_constraints(scenario, steps, back_cylinder, deco_cyls_with_depths,
-                      dive_mode, emergency_sac, contingency, practical_empty_bar,
-                      max_cns, max_otu, max_runtime, depth):
+def check_constraints(scenario, back_cylinder, deco_cyls_with_depths,
+                      dive_mode, contingency, practical_empty_bar,
+                      max_cns, max_otu, max_runtime):
     """
     Check all constraints for a given scenario.
     Returns (passes: bool, violations: list[str])
+
+    Open-water back-gas sufficiency is read from scenario['min_gas'], which
+    run_scenario() already computed via dive_plan.calculate_min_gas_and_turn_from_summary
+    (the one place that math is done — not recomputed here).
     """
     violations = []
 
@@ -22,20 +26,6 @@ def check_constraints(scenario, steps, back_cylinder, deco_cyls_with_depths,
     if max_runtime is not None and scenario['total_time'] > max_runtime:
         violations.append(f"Runtime {scenario['total_time']:.1f} min > limit {max_runtime} min")
 
-    # Gas constraints
-    deco_cylinders_for_plan = [c for c, _ in deco_cyls_with_depths]
-    if steps is None:
-        gas_plan = {}
-    else:
-        gas_plan = calc_gas_plan(
-            steps, depth, back_cylinder, deco_cylinders_for_plan,
-            dive_mode=dive_mode,
-            emergency_sac=emergency_sac,
-            contingency=contingency,
-            practical_empty_bar=practical_empty_bar,
-        )
-
-    bg = gas_plan.get('back_gas', {})
     if dive_mode == 'cave':
         for cyl_data in scenario.get('cylinders', []):
             if cyl_data.get('name') == back_cylinder.name:
@@ -45,11 +35,12 @@ def check_constraints(scenario, steps, back_cylinder, deco_cyls_with_depths,
                         f"({cyl_data['remaining_bar']:.0f} bar < {practical_empty_bar} bar)"
                     )
     else:
-        mg = bg.get('ow_min_gas', {})
-        if not mg.get('has_enough_gas', True):
+        mg = scenario['min_gas']
+        turn_pressure_bar = mg['turn_pressure_bar'] * contingency
+        if mg['bar_at_turn'] < turn_pressure_bar:
             violations.append(
-                f"Back gas insufficient: need {mg.get('turn_pressure_bar', 0):.0f} bar at turn, "
-                f"have {mg.get('bar_at_turn', 0):.0f} bar"
+                f"Back gas insufficient: need {turn_pressure_bar:.0f} bar at turn, "
+                f"have {mg['bar_at_turn']:.0f} bar"
             )
 
     # Deco gas constraints: check remaining bar >= practical_empty after dive
@@ -63,6 +54,21 @@ def check_constraints(scenario, steps, back_cylinder, deco_cyls_with_depths,
                     )
 
     return len(violations) == 0, violations
+
+
+def _bottom_time_kwargs(dive_mode, gf_low, gf_high, sac_bottom, sac_deco, sac_emergency,
+                        contingency, practical_empty_bar, max_cns, max_otu, max_runtime,
+                        min_bottom_time, max_bottom_time):
+    """Bundle the constraint/rate params shared by every optimise_bottom_time() call within
+    one higher-level search (optimise_deco_gas / optimise_both_deco_gases / optimise_gas_mix),
+    so each call site passes **kwargs instead of repeating the same ~13 arguments."""
+    return dict(
+        dive_mode=dive_mode, gf_low=gf_low, gf_high=gf_high,
+        sac_bottom=sac_bottom, sac_deco=sac_deco, sac_emergency=sac_emergency,
+        contingency=contingency, practical_empty_bar=practical_empty_bar,
+        max_cns=max_cns, max_otu=max_otu, max_runtime=max_runtime,
+        min_bottom_time=min_bottom_time, max_bottom_time=max_bottom_time,
+    )
 
 
 def optimise_bottom_time(
@@ -110,21 +116,21 @@ def optimise_bottom_time(
 
     def evaluate(bt):
         try:
-            scenario = run_scenario("opt", depth, bt, deco_gases_lost=False, cfg=cfg)
+            scenario = run_scenario("opt", depth, bt, deco_gases_lost=False, cfg=cfg,
+                                    emergency_sac=sac_emergency)
         except Exception as exc:
-            return False, [f"Calculation failed: {exc}"], None, None
-        steps = scenario.pop('steps', None)
+            return False, [f"Calculation failed: {exc}"], None
         passes, violations = check_constraints(
-            scenario, steps, back_cylinder, deco_cyls_with_depths,
-            dive_mode, sac_emergency, contingency, practical_empty_bar,
-            max_cns, max_otu, max_runtime, depth,
+            scenario, back_cylinder, deco_cyls_with_depths,
+            dive_mode, contingency, practical_empty_bar,
+            max_cns, max_otu, max_runtime,
         )
-        return passes, violations, scenario, steps
+        return passes, violations, scenario
 
     steps_checked = 0
 
     # First check if min_viable_bt even passes
-    passes, violations, scenario, steps = evaluate(min_viable_bt)
+    passes, violations, scenario = evaluate(min_viable_bt)
     steps_checked += 1
     if not passes:
         return {
@@ -140,36 +146,31 @@ def optimise_bottom_time(
     lo, hi = min_viable_bt, max_bottom_time
     best_bt = min_viable_bt
     best_scenario = scenario
-    best_steps = steps
 
     while lo <= hi:
         mid = (lo + hi) // 2
-        passes, violations, scenario, steps = evaluate(mid)
+        passes, violations, scenario = evaluate(mid)
         steps_checked += 1
         if passes:
             best_bt = mid
             best_scenario = scenario
-            best_steps = steps
             lo = mid + 1
         else:
             hi = mid - 1
 
     # Get violations at best_bt + 1 to show binding constraints
     if best_bt < max_bottom_time:
-        _, binding, _, _ = evaluate(best_bt + 1)
+        _, binding, _ = evaluate(best_bt + 1)
         steps_checked += 1
     else:
         binding = ['Search limit reached (max_bottom_time)']
 
-    # Build final gas plan for the best scenario
-    deco_cylinders_for_plan = [c for c, _ in deco_cyls_with_depths]
     gas_plan = calc_gas_plan(
-        best_steps, depth, back_cylinder, deco_cylinders_for_plan,
+        best_scenario['min_gas'], back_cylinder, deco_cyls_with_depths,
         dive_mode=dive_mode,
-        emergency_sac=sac_emergency,
         contingency=contingency,
         practical_empty_bar=practical_empty_bar,
-    ) if best_steps is not None else {}
+    )
 
     return {
         'max_bottom_time': best_bt,
@@ -224,6 +225,12 @@ def optimise_deco_gas(
       total_steps_checked: int
       mixes_evaluated: int
     """
+    bt_kwargs = _bottom_time_kwargs(
+        dive_mode, gf_low, gf_high, sac_bottom, sac_deco, sac_emergency,
+        contingency, practical_empty_bar, max_cns, max_otu, max_runtime,
+        min_bottom_time, max_bottom_time,
+    )
+
     all_results = []
     total_steps_checked = 0
 
@@ -251,19 +258,7 @@ def optimise_deco_gas(
             depth=depth,
             back_cylinder=back_cylinder,
             deco_cyls_with_depths=deco_cyls,
-            dive_mode=dive_mode,
-            gf_low=gf_low,
-            gf_high=gf_high,
-            sac_bottom=sac_bottom,
-            sac_deco=sac_deco,
-            sac_emergency=sac_emergency,
-            contingency=contingency,
-            practical_empty_bar=practical_empty_bar,
-            max_cns=max_cns,
-            max_otu=max_otu,
-            max_runtime=max_runtime,
-            min_bottom_time=min_bottom_time,
-            max_bottom_time=max_bottom_time,
+            **bt_kwargs,
         )
         total_steps_checked += result['steps_checked']
 
@@ -300,19 +295,7 @@ def optimise_deco_gas(
             depth=depth,
             back_cylinder=back_cylinder,
             deco_cyls_with_depths=deco_cyls,
-            dive_mode=dive_mode,
-            gf_low=gf_low,
-            gf_high=gf_high,
-            sac_bottom=sac_bottom,
-            sac_deco=sac_deco,
-            sac_emergency=sac_emergency,
-            contingency=contingency,
-            practical_empty_bar=practical_empty_bar,
-            max_cns=max_cns,
-            max_otu=max_otu,
-            max_runtime=max_runtime,
-            min_bottom_time=min_bottom_time,
-            max_bottom_time=max_bottom_time,
+            **bt_kwargs,
         )
         total_steps_checked += best_result['steps_checked']
 
@@ -368,6 +351,12 @@ def optimise_both_deco_gases(
       best_result: full optimise_bottom_time() result for the winner
       total_steps_checked, mixes_evaluated
     """
+    bt_kwargs = _bottom_time_kwargs(
+        dive_mode, gf_low, gf_high, sac_bottom, sac_deco, sac_emergency,
+        contingency, practical_empty_bar, max_cns, max_otu, max_runtime,
+        min_bottom_time, max_bottom_time,
+    )
+
     evaluated = {}   # (d1_o2, d2_o2) -> result record or None
     total_steps_checked = 0
     best_d1, best_d2, best_bt = None, None, -1
@@ -395,11 +384,7 @@ def optimise_both_deco_gases(
         result = optimise_bottom_time(
             depth=depth, back_cylinder=back_cylinder,
             deco_cyls_with_depths=deco_cyls,
-            dive_mode=dive_mode, gf_low=gf_low, gf_high=gf_high,
-            sac_bottom=sac_bottom, sac_deco=sac_deco, sac_emergency=sac_emergency,
-            contingency=contingency, practical_empty_bar=practical_empty_bar,
-            max_cns=max_cns, max_otu=max_otu, max_runtime=max_runtime,
-            min_bottom_time=min_bottom_time, max_bottom_time=max_bottom_time,
+            **bt_kwargs,
         )
         total_steps_checked += result['steps_checked']
 
@@ -458,11 +443,7 @@ def optimise_both_deco_gases(
         best_result = optimise_bottom_time(
             depth=depth, back_cylinder=back_cylinder,
             deco_cyls_with_depths=deco_cyls,
-            dive_mode=dive_mode, gf_low=gf_low, gf_high=gf_high,
-            sac_bottom=sac_bottom, sac_deco=sac_deco, sac_emergency=sac_emergency,
-            contingency=contingency, practical_empty_bar=practical_empty_bar,
-            max_cns=max_cns, max_otu=max_otu, max_runtime=max_runtime,
-            min_bottom_time=min_bottom_time, max_bottom_time=max_bottom_time,
+            **bt_kwargs,
         )
         total_steps_checked += best_result['steps_checked']
 
@@ -529,6 +510,12 @@ def optimise_gas_mix(
             break
         candidates.append((max_o2_pct, he))
 
+    bt_kwargs = _bottom_time_kwargs(
+        dive_mode, gf_low, gf_high, sac_bottom, sac_deco, sac_emergency,
+        contingency, practical_empty_bar, max_cns, max_otu, max_runtime,
+        min_bottom_time, max_bottom_time,
+    )
+
     all_results = []
     total_steps_checked = 0
 
@@ -543,19 +530,7 @@ def optimise_gas_mix(
             depth=depth,
             back_cylinder=back_cyl,
             deco_cyls_with_depths=deco_cyls_with_depths,
-            dive_mode=dive_mode,
-            gf_low=gf_low,
-            gf_high=gf_high,
-            sac_bottom=sac_bottom,
-            sac_deco=sac_deco,
-            sac_emergency=sac_emergency,
-            contingency=contingency,
-            practical_empty_bar=practical_empty_bar,
-            max_cns=max_cns,
-            max_otu=max_otu,
-            max_runtime=max_runtime,
-            min_bottom_time=min_bottom_time,
-            max_bottom_time=max_bottom_time,
+            **bt_kwargs,
         )
         total_steps_checked += result['steps_checked']
         all_results.append({
@@ -587,19 +562,7 @@ def optimise_gas_mix(
             depth=depth,
             back_cylinder=best_cyl,
             deco_cyls_with_depths=deco_cyls_with_depths,
-            dive_mode=dive_mode,
-            gf_low=gf_low,
-            gf_high=gf_high,
-            sac_bottom=sac_bottom,
-            sac_deco=sac_deco,
-            sac_emergency=sac_emergency,
-            contingency=contingency,
-            practical_empty_bar=practical_empty_bar,
-            max_cns=max_cns,
-            max_otu=max_otu,
-            max_runtime=max_runtime,
-            min_bottom_time=min_bottom_time,
-            max_bottom_time=max_bottom_time,
+            **bt_kwargs,
         )
         total_steps_checked += best_full_result['steps_checked']
 
