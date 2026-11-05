@@ -14,6 +14,10 @@ c:\repos\dive_planner\
 ├── gas_planning.py       # Pure gas calculation helpers
 ├── api.py                # FastAPI REST backend (not used by Streamlit deployment)
 ├── optimiser.py          # Binary search + grid search for API path
+├── scenario_helpers.py   # Scenario table defaults, parsing, URL (b64) encode/decode
+├── sticker.py            # Printable 80×50 mm thermal-label PNG (Pillow, no Streamlit)
+├── fonts/                # Bundled fonts for sticker.py (DejaVu Sans Condensed, Noto Emoji; licences alongside)
+├── tests/                # pytest — `.venv\Scripts\python.exe -m pytest tests`
 ├── requirements.txt      # Production deps — keep decodaitengu>=1.4.0
 └── static/               # HTML/CSS/JS for FastAPI static mount
 ```
@@ -166,6 +170,9 @@ Full list:
 | `fc_he` | float | 0.13 | Fill cost per litre He |
 | `fc_tmix` | float | 40.0 | Trimix blend charge |
 | `fc_nit` | float | 10.0 | Nitrox blend charge |
+| `name` | str | "" | Plan name (printed on the sticker) |
+| `date` | str | today | Dive date, ISO `YYYY-MM-DD` (printed on the sticker as dd/mm/yy) |
+| `scenarios` | b64 JSON | defaults | Scenario editor rows (see `scenario_helpers._SCENARIO_COLS`) |
 
 ---
 
@@ -270,6 +277,15 @@ Uses 1.01325 bar (not 1.0 bar), so EAN50 MOD is 21m not 22m. Pure O2 is clamped 
 Triggered when back gas O2 < 4%. Adds Travel gas row, H2 switch depth input, and prominent warning banner. H2 coefficients are unvalidated — for research only.
 
 `back_gas` in `streamlit_app.py` is always the 3-tuple `(o2, he, h2)`. Any narcotic-fraction calc (END row, Best Mix Calculator, etc.) must exclude `back_gas[2]` (H2) the same way it excludes He — H2 is not narcotic. The live END row was missing this until it was fixed to match the H2 exclusion already applied to helium.
+
+### 10. Sticker (`sticker.py`)
+
+Renders the planning table as a 1-bit 640×384 PNG at 203 dpi: an 80×50 mm label on a Niimbot B1 (≈48 mm head, so the label feeds with its 50 mm side across the head and the printer app rotates the image). Render at the printer's native resolution — a higher-res image gets downsampled by the printer app, which turns 1-bit text to mush. `draw.fontmode = "1"` keeps it free of grey anti-aliasing.
+
+- Scenario rows carry two sticker-only columns, `print` and `short`. They're listed in `_STICKER_COLS` and stripped from the `_compute_scenarios` cache key so toggling them doesn't recompute every scenario.
+- `sticker.gas_role_at()` is the single source of "which deco gas is on at this depth" — the on-screen table's `_color_cells` uses it too. It handles `deco_gases_lost` being `True`, a string, or a list.
+- Emoji in `short`/plan name render via the monochrome Noto Emoji font. Pillow here has no raqm shaping, so ZWJ sequences render as their separate parts, and skin-tone/variation selectors are dropped.
+- `_b64_to_scenarios_df` salvages old or partial URLs: missing columns are filled from the matching default row (by name), else blanks. Only an undecodable string falls back to the defaults. Add a new scenario column to `_SCENARIO_COLS` and `_row()` and old URLs keep working.
 
 ---
 

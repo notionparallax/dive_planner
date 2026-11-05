@@ -1,6 +1,7 @@
 """Dive planner web interface."""
 
 import base64
+import datetime
 import importlib.metadata
 import json
 import os
@@ -37,6 +38,18 @@ from dive_plan import (  # noqa: E402
     run_scenario,
 )
 from gas_planning import calc_switch_depth  # noqa: E402
+from sticker import (  # noqa: E402
+    LEAN,
+    RICH,
+    STICKER_DPI,
+    STICKER_H,
+    STICKER_W,
+    TitleItem,
+    build_grid,
+    lost_set,
+    png_bytes,
+    render_sticker,
+)
 
 st.set_page_config(
     page_title="Dive Planner",
@@ -101,6 +114,8 @@ def fmt_time(minutes, decimals=0):
 # ─── Scenario definitions ─────────────────────────────────────────────────────
 from scenario_helpers import (  # noqa: E402
     _SCENARIO_COLS,
+    _STICKER_COLS,
+    _default_short,
     _EMERGENCY_ASCENT_RATE,
     _default_scenario_rows,
     _parse_dim,
@@ -113,6 +128,17 @@ from scenario_helpers import (  # noqa: E402
 
 with st.sidebar:
     st.title("🤿 Dive Planner")
+
+    # Plan name + date — printed on the sticker. Both persist in the URL so a
+    # bookmarked plan keeps them.
+    plan_name = st.text_input(
+        "Plan name", value=_qp.get("name", ""), placeholder="e.g. Cave Dive 3", max_chars=40
+    )
+    try:
+        _plan_date_default = datetime.date.fromisoformat(_qp.get("date", ""))
+    except ValueError:
+        _plan_date_default = datetime.date.today()
+    plan_date = st.date_input("Dive date", value=_plan_date_default, format="DD/MM/YYYY")
 
     # Actual widget lives in the Settings expander below; read the persisted value
     # here (same early-read pattern as o2_narcotic) since several widgets above
@@ -587,6 +613,8 @@ _qp_updates = {
     "cns_warn": cns_warn,
     "min_res": min_gas_reserve,
     "o2_narc": int(o2_narcotic),
+    "name": plan_name,
+    "date": plan_date.isoformat(),
 }
 if lean_enabled:
     _qp_updates.update(
@@ -821,12 +849,35 @@ _ar_cache = (
 )
 
 
-# Convert scenarios df to a hashable tuple-of-frozensets for cache key
+# Convert scenarios df to a hashable tuple-of-frozensets for cache key.
+# Sticker-only columns (print/short) are left out so toggling them doesn't
+# re-run every scenario.
 def _df_to_scenario_rows_tuple(df) -> tuple:
-    return tuple(tuple(sorted(row.items())) for row in df.to_dict(orient="records"))
+    return tuple(
+        tuple(sorted((k, v) for k, v in row.items() if k not in _STICKER_COLS))
+        for row in df.to_dict(orient="records")
+    )
+
+
+def _is_true(v, default=True):
+    """Checkbox cell → bool; blank/NaN (e.g. a freshly added editor row) → default."""
+    if v is None or (isinstance(v, float) and v != v):
+        return default
+    return bool(v)
 
 
 _scenario_rows_cache = _df_to_scenario_rows_tuple(st.session_state["scenarios_df"])
+
+# Sticker settings for each *enabled* row, in the same order _compute_scenarios
+# returns its results.
+_sticker_meta = []
+for _row in st.session_state["scenarios_df"].to_dict(orient="records"):
+    if _row.get("enabled") is False:
+        continue
+    _short = _row.get("short")
+    if _short is None or (isinstance(_short, float) and _short != _short) or not str(_short).strip():
+        _short = _default_short(_row.get("name", ""))
+    _sticker_meta.append({"print": _is_true(_row.get("print")), "short": str(_short).strip()})
 
 with st.spinner("Computing…"):
     _tv_config = (
@@ -1063,7 +1114,15 @@ with st.expander("✏️ Customise scenarios", expanded=False):
         width="stretch",
         column_config={
             "enabled": st.column_config.CheckboxColumn("✓", width="small"),
+            "print": st.column_config.CheckboxColumn(
+                "🖨️", width="small", help="Include this scenario on the printed sticker"
+            ),
             "name": st.column_config.TextColumn("Name", width="medium"),
+            "short": st.column_config.TextColumn(
+                "Short",
+                width="small",
+                help="Sticker column heading — keep it to ≈5 characters. Emoji are fine.",
+            ),
             "depth": st.column_config.TextColumn(
                 "Depth", width="small", help="+3 = D+3m, 45 = absolute 45m, blank = D"
             ),
@@ -1268,8 +1327,7 @@ def _color_cells(data):
         for j, col_name in enumerate(data.columns):
             if j == 0:
                 continue
-            lost = col_to_lost.get(col_name, False)
-            available = lost not in (True, zone_role)
+            available = zone_role not in lost_set(col_to_lost.get(col_name, False))
             color = _zone_color(zone_role, available)
             if color:
                 styles.iloc[i, j] = color
@@ -1295,6 +1353,63 @@ st.dataframe(
     hide_index=True,
     width="stretch",
 )
+
+# ─── Printable sticker ────────────────────────────────────────────────────────
+with st.expander("🏷️ Sticker (80×50 mm thermal label)", expanded=True):
+    _printed = [
+        dict(r, short=m["short"])
+        for r, m in zip(results, _sticker_meta)
+        if m["print"] and not r.get("infeasible")
+    ]
+    if not _printed:
+        st.info("No scenarios ticked for printing — tick 🖨️ in ✏️ Customise scenarios.")
+    else:
+
+        def _gas_label(o2_pct, he_pct, h2_pct=0):
+            if h2_pct:
+                return f"{o2_pct}/{he_pct}/{h2_pct}"
+            if he_pct:
+                return f"{o2_pct}/{he_pct}"
+            if o2_pct == 100:
+                return "O2"
+            return "Air" if o2_pct == 21 else f"{o2_pct}%"
+
+        _turn_src = next((r for r in results if not r.get("infeasible")), None)
+        _title = []
+        if plan_name.strip():
+            _title.append(TitleItem(plan_name.strip(), bold=True))
+        _title.append(TitleItem(plan_date.strftime("%d/%m/%y")))
+        _title.append(TitleItem(f"GF {int(gf_low * 100)}/{int(gf_high * 100)}"))
+        _title.append(TitleItem(_gas_label(back_gas[0], back_gas[1], back_gas[2])))
+        if lean_enabled:
+            _title.append(TitleItem(_gas_label(lean_o2, lean_he), LEAN))
+        if rich_enabled:
+            _title.append(TitleItem(_gas_label(rich_o2, rich_he), RICH))
+        if _turn_src is not None:
+            _title.append(TitleItem(f"TP {_turn_src['min_gas']['bar_at_turn']:.0f}"))
+
+        _headers, _grid = build_grid(
+            _printed,
+            # Metric keeps the "m" like a hand-made slate; feet drop the unit.
+            lambda m: fmt_depth(m, depth_unit).removesuffix("ft"),
+            lean_switch if lean_enabled else None,
+            rich_switch if rich_enabled else None,
+        )
+        _img, _info = render_sticker(_title, _headers, _grid)
+        for _w in _info["warnings"]:
+            st.warning(_w)
+        st.image(png_bytes(_img), width=STICKER_W)
+        _slug = "".join(c if c.isalnum() else "-" for c in plan_name.strip()).strip("-")
+        st.download_button(
+            "⬇️ Download sticker PNG",
+            data=png_bytes(_img),
+            file_name=f"{_slug or 'dive-plan'}_{plan_date.isoformat()}.png",
+            mime="image/png",
+        )
+        st.caption(
+            f"{STICKER_W}×{STICKER_H} px at {STICKER_DPI} dpi, font {_info['font_size']} px. "
+            "Lean gas is **bold + underlined**, rich gas is white on black."
+        )
 
 # ─── Scenario selector ────────────────────────────────────────────────────────
 _feasible_results = [r for r in results if not r.get("infeasible")]
