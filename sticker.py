@@ -293,3 +293,144 @@ def png_bytes(img) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG", dpi=(STICKER_DPI, STICKER_DPI))
     return buf.getvalue()
+
+
+# ─── Cylinder (gas mix) stickers ──────────────────────────────────────────────
+# Same 80×50 mm label as the plan sticker. A deco gas gets three labels laid
+# side by side on the cylinder — |NX|50%|21m| — and the back gas gets one.
+HYPOXIC_PPO2 = 0.18  # minimum operating depth is printed when surface ppO2 < this
+GAS_MARGIN = 10
+
+
+def gas_kind_and_mix(o2: int, he: int, h2: int = 0) -> tuple[str, str]:
+    """('NX', '50%'), ('TX', '18/45'), ('O2', '100%'), ('AIR', '21%'), ('HX', '2/48/50')."""
+    if h2:
+        return "HX", f"{o2}/{he}/{h2}"
+    if he:
+        return "TX", f"{o2}/{he}"
+    if o2 >= 100:
+        return "O2", "100%"
+    if o2 == 21:
+        return "AIR", "21%"
+    return "NX", f"{o2}%"
+
+
+def min_operating_depth(o2_frac: float, min_ppo2: float = HYPOXIC_PPO2,
+                        surface_pressure: float = 1.01325) -> int:
+    """Shallowest whole-metre depth where the gas reaches min_ppo2; 0 if breathable at the surface."""
+    import math
+    return max(0, math.ceil((min_ppo2 / o2_frac - surface_pressure) * 10))
+
+
+def _ink(text, size, bold=True):
+    """Ink bbox (l, t, r, b) relative to a baseline-left origin."""
+    return _font(_BOLD if bold else _REGULAR, size).getbbox(text, anchor="ls")
+
+
+def _fit(text, max_w, max_h, bold=True, hi=600):
+    """Largest font size whose ink fits max_w × max_h."""
+    lo, best = 6, 6
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        l, t, r, b = _ink(text, mid, bold)
+        if r - l <= max_w and b - t <= max_h:
+            best, lo = mid, mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def _put(draw, text, size, cx, cy, bold=True):
+    """Draw text with its ink box centred on (cx, cy). Returns the ink box in image coords."""
+    l, t, r, b = _ink(text, size, bold)
+    ox, oy = cx - (l + r) / 2, cy - (t + b) / 2
+    draw.text((ox, oy), text, font=_font(_BOLD if bold else _REGULAR, size), fill=0, anchor="ls")
+    return ox + l, oy + t, ox + r, oy + b
+
+
+def _blank(width, height):
+    img = Image.new("1", (width, height), 1)
+    draw = ImageDraw.Draw(img)
+    draw.fontmode = "1"
+    return img, draw
+
+
+def _caption(draw, text, x0, x1, y0, size):
+    """Small left-aligned line (name · date), emoji-capable. Returns its bottom y."""
+    if not text:
+        return y0
+    while size > MIN_FONT and text_width(text, False, size) > x1 - x0:
+        size -= 1
+    asc, desc = _font(_REGULAR, size).getmetrics()
+    _draw_text(draw, x0, y0 + (asc + desc) / 2, text, False, size, 0)
+    return y0 + asc + desc
+
+
+def _name_date(name: str, date_str: str) -> str:
+    return " · ".join(p for p in (name.strip(), date_str) if p)
+
+
+def _mod_block(draw, depth_m, label, box):
+    """'21m' as big as fits in box, with `label` small in the space above the 'm'."""
+    x0, y0, x1, y1 = box
+    text = f"{depth_m}m"
+    size = _fit(text, x1 - x0, y1 - y0)
+    l, t, r, b = _put(draw, text, size, (x0 + x1) / 2, (y0 + y1) / 2)
+    # Locate the 'm' and the top of its x-height.
+    digits_r = l + (_font(_BOLD, size).getlength(str(depth_m)))
+    ml, mt, mr, mb = _ink("m", size)
+    m_top = b - (mb - mt)
+    gap = size * 0.04
+    # The label lives in the empty space above the 'm' (up to the label's top
+    # margin). Use one line or two stacked ("MOD" / "@ 1.6"), whichever is bigger.
+    bw, bh = r - digits_r - gap, m_top - y0 - 2 * gap
+    bx, by = (digits_r + gap + r) / 2, (y0 + m_top - gap) / 2
+    one = _fit(label, bw, bh, hi=size)
+    parts = label.split(" ", 1)
+    two = min(_fit(p, bw, bh * 0.45, hi=size) for p in parts) if len(parts) == 2 else 0
+    if two > one:
+        _put(draw, parts[0], two, bx, by - bh * 0.25)
+        _put(draw, parts[1], two, bx, by + bh * 0.25)
+    else:
+        _put(draw, label, one, bx, by)
+
+
+def render_deco_gas_stickers(o2: int, he: int, mod_m: int, mod_ppo2: float,
+                             name: str = "", date_str: str = "",
+                             width: int = STICKER_W, height: int = STICKER_H):
+    """Three labels for a deco cylinder: [kind, mix (+ name/date), MOD]."""
+    kind, mix = gas_kind_and_mix(o2, he)
+    W, H, M = width, height, GAS_MARGIN
+
+    a, d = _blank(W, H)
+    _put(d, kind, _fit(kind, W - 2 * M, H - 2 * M), W / 2, H / 2)
+
+    b, d = _blank(W, H)
+    top = _caption(d, _name_date(name, date_str), M, W - M, M, 34) + M
+    _put(d, mix, _fit(mix, W - 2 * M, H - top - M), W / 2, (top + H - M) / 2)
+
+    c, d = _blank(W, H)
+    _mod_block(d, mod_m, f"MOD @ {mod_ppo2:g}", (M, M, W - M, H - M))
+    return [a, b, c]
+
+
+def render_back_gas_sticker(o2: int, he: int, h2: int, mod_m: int, mod_ppo2: float,
+                            name: str = "", date_str: str = "",
+                            width: int = STICKER_W, height: int = STICKER_H):
+    """One label for the back gas: name/date, 'TX 18/45', MOD and (hypoxic) MIN."""
+    kind, mix = gas_kind_and_mix(o2, he, h2)
+    W, H, M = width, height, GAS_MARGIN
+    img, d = _blank(W, H)
+    top = _caption(d, _name_date(name, date_str), M, W - M, M, 34) + M
+    avail = H - top - M
+    headline = kind if kind == "AIR" else f"{kind} {mix}"
+    _put(d, headline, _fit(headline, W - 2 * M, avail * 0.45), W / 2, top + avail * 0.225)
+    lines = [f"MOD @ {mod_ppo2:g}  {mod_m}m"]
+    min_m = min_operating_depth(o2 / 100) if o2 else 0
+    if min_m:
+        lines.append(f"MIN @ {HYPOXIC_PPO2:g}  {min_m}m")
+    row_h = avail * 0.55 / len(lines)
+    size = min(_fit(s, W - 2 * M, row_h * 0.8) for s in lines)
+    for i, s in enumerate(lines):
+        _put(d, s, size, W / 2, top + avail * 0.45 + row_h * (i + 0.5))
+    return img

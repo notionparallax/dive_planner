@@ -48,6 +48,8 @@ from sticker import (  # noqa: E402
     build_grid,
     lost_set,
     png_bytes,
+    render_back_gas_sticker,
+    render_deco_gas_stickers,
     render_sticker,
 )
 
@@ -1354,63 +1356,6 @@ st.dataframe(
     width="stretch",
 )
 
-# ─── Printable sticker ────────────────────────────────────────────────────────
-with st.expander("🏷️ Sticker (80×50 mm thermal label)", expanded=True):
-    _printed = [
-        dict(r, short=m["short"])
-        for r, m in zip(results, _sticker_meta)
-        if m["print"] and not r.get("infeasible")
-    ]
-    if not _printed:
-        st.info("No scenarios ticked for printing — tick 🖨️ in ✏️ Customise scenarios.")
-    else:
-
-        def _gas_label(o2_pct, he_pct, h2_pct=0):
-            if h2_pct:
-                return f"{o2_pct}/{he_pct}/{h2_pct}"
-            if he_pct:
-                return f"{o2_pct}/{he_pct}"
-            if o2_pct == 100:
-                return "O2"
-            return "Air" if o2_pct == 21 else f"{o2_pct}%"
-
-        _turn_src = next((r for r in results if not r.get("infeasible")), None)
-        _title = []
-        if plan_name.strip():
-            _title.append(TitleItem(plan_name.strip(), bold=True))
-        _title.append(TitleItem(plan_date.strftime("%d/%m/%y")))
-        _title.append(TitleItem(f"GF {int(gf_low * 100)}/{int(gf_high * 100)}"))
-        _title.append(TitleItem(_gas_label(back_gas[0], back_gas[1], back_gas[2])))
-        if lean_enabled:
-            _title.append(TitleItem(_gas_label(lean_o2, lean_he), LEAN))
-        if rich_enabled:
-            _title.append(TitleItem(_gas_label(rich_o2, rich_he), RICH))
-        if _turn_src is not None:
-            _title.append(TitleItem(f"TP {_turn_src['min_gas']['bar_at_turn']:.0f}"))
-
-        _headers, _grid = build_grid(
-            _printed,
-            # Metric keeps the "m" like a hand-made slate; feet drop the unit.
-            lambda m: fmt_depth(m, depth_unit).removesuffix("ft"),
-            lean_switch if lean_enabled else None,
-            rich_switch if rich_enabled else None,
-        )
-        _img, _info = render_sticker(_title, _headers, _grid)
-        for _w in _info["warnings"]:
-            st.warning(_w)
-        st.image(png_bytes(_img), width=STICKER_W)
-        _slug = "".join(c if c.isalnum() else "-" for c in plan_name.strip()).strip("-")
-        st.download_button(
-            "⬇️ Download sticker PNG",
-            data=png_bytes(_img),
-            file_name=f"{_slug or 'dive-plan'}_{plan_date.isoformat()}.png",
-            mime="image/png",
-        )
-        st.caption(
-            f"{STICKER_W}×{STICKER_H} px at {STICKER_DPI} dpi, font {_info['font_size']} px. "
-            "Lean gas is **bold + underlined**, rich gas is white on black."
-        )
-
 # ─── Scenario selector ────────────────────────────────────────────────────────
 _feasible_results = [r for r in results if not r.get("infeasible")]
 tags = [r["tag"] for r in _feasible_results]
@@ -1645,6 +1590,138 @@ fig.update_yaxes(title_text="Pressure (bar)", rangemode="tozero", row=2, col=1)
 fig.update_xaxes(title_text="Time (min)", row=2, col=1)
 
 st.plotly_chart(fig, width="stretch")
+
+
+# ─── Printable sticker ────────────────────────────────────────────────────────
+with st.expander("🏷️ Sticker (80×50 mm thermal label)", expanded=True):
+    _printed = [
+        dict(r, short=m["short"])
+        for r, m in zip(results, _sticker_meta)
+        if m["print"] and not r.get("infeasible")
+    ]
+    if not _printed:
+        st.info("No scenarios ticked for printing — tick 🖨️ in ✏️ Customise scenarios.")
+    else:
+
+        def _gas_label(o2_pct, he_pct, h2_pct=0):
+            if h2_pct:
+                return f"{o2_pct}/{he_pct}/{h2_pct}"
+            if he_pct:
+                return f"{o2_pct}/{he_pct}"
+            if o2_pct == 100:
+                return "O2"
+            return "Air" if o2_pct == 21 else f"{o2_pct}%"
+
+        _turn_src = next((r for r in results if not r.get("infeasible")), None)
+        _title = []
+        if plan_name.strip():
+            _title.append(TitleItem(plan_name.strip(), bold=True))
+        _title.append(TitleItem(plan_date.strftime("%d/%m/%y")))
+        _title.append(TitleItem(f"GF {int(gf_low * 100)}/{int(gf_high * 100)}"))
+        _title.append(TitleItem(_gas_label(back_gas[0], back_gas[1], back_gas[2])))
+        if lean_enabled:
+            _title.append(TitleItem(_gas_label(lean_o2, lean_he), LEAN))
+        if rich_enabled:
+            _title.append(TitleItem(_gas_label(rich_o2, rich_he), RICH))
+        if _turn_src is not None:
+            _title.append(TitleItem(f"TP {_turn_src['min_gas']['bar_at_turn']:.0f}"))
+
+        _headers, _grid = build_grid(
+            _printed,
+            # Metric keeps the "m" like a hand-made slate; feet drop the unit.
+            lambda m: fmt_depth(m, depth_unit).removesuffix("ft"),
+            lean_switch if lean_enabled else None,
+            rich_switch if rich_enabled else None,
+        )
+        _img, _info = render_sticker(_title, _headers, _grid)
+        for _w in _info["warnings"]:
+            st.warning(_w)
+        st.image(png_bytes(_img), width=STICKER_W)
+        _slug = "".join(c if c.isalnum() else "-" for c in plan_name.strip()).strip("-")
+        st.download_button(
+            "⬇️ Download sticker PNG",
+            data=png_bytes(_img),
+            file_name=f"{_slug or 'dive-plan'}_{plan_date.isoformat()}.png",
+            mime="image/png",
+        )
+        st.caption(
+            f"{STICKER_W}×{STICKER_H} px at {STICKER_DPI} dpi, font {_info['font_size']} px. "
+            "Lean gas is **bold + underlined**, rich gas is white on black."
+        )
+
+# ─── Cylinder stickers ────────────────────────────────────────────────────────
+with st.expander("🏷️ Cylinder stickers (80×50 mm thermal labels)", expanded=True):
+    diver_name = st.text_input(
+        "Diver name", value=_qp.get("diver", ""), max_chars=30,
+        help="Printed small on each cylinder sticker with the dive date. "
+        "For a team, put the team name here.",
+    )
+    _qp_set({"diver": diver_name})
+    _date_str = plan_date.strftime("%d/%m/%y")
+    _file_base = "".join(c if c.isalnum() else "-" for c in diver_name.strip()).strip("-")
+    _file_base = f"{_file_base or 'cylinder'}_{plan_date.isoformat()}"
+
+    def _sticker_buttons(images, stem):
+        cols = st.columns(len(images))
+        for i, (col, img) in enumerate(zip(cols, images), start=1):
+            data = png_bytes(img)
+            col.image(data, width="stretch")
+            suffix = f"_{i}" if len(images) > 1 else ""
+            col.download_button(
+                f"⬇️ {i}/{len(images)}" if len(images) > 1 else "⬇️ Download",
+                data=data,
+                file_name=f"{_file_base}_{stem}{suffix}.png",
+                mime="image/png",
+                key=f"dl_{stem}{suffix}",
+            )
+
+    def _stem(o2_, he_, h2_=0):
+        parts = (o2_, he_, h2_)[: 3 if h2_ else 2 if he_ else 1]
+        return "-".join(str(v) for v in parts)
+
+    _single = []  # (heading, image, stem)
+    if back_gas[0] > 0:
+        _single.append((
+            "Back gas",
+            render_back_gas_sticker(
+                back_gas[0], back_gas[1], back_gas[2],
+                calc_switch_depth(back_gas[0] / 100.0, float(ppo2_bottom)), float(ppo2_bottom),
+                diver_name, _date_str,
+            ),
+            f"back_{_stem(*back_gas)}",
+        ))
+    if _travel_mode:
+        _single.append((
+            "Travel gas",
+            render_back_gas_sticker(
+                travel_o2, travel_he, 0,
+                calc_switch_depth(travel_o2 / 100.0, float(ppo2_bottom)), float(ppo2_bottom),
+                diver_name, _date_str,
+            ),
+            f"travel_{_stem(travel_o2, travel_he)}",
+        ))
+    _single_cols = st.columns(3)
+    for _col, (_heading, _img, _st) in zip(_single_cols, _single):
+        with _col:
+            st.markdown(f"**{_heading}**")
+            _sticker_buttons([_img], _st)
+
+    for _label, _go2, _ghe, _sw, _on in (
+        ("Lean gas", lean_o2, lean_he, lean_switch, lean_enabled),
+        ("Rich gas", rich_o2, rich_he, rich_switch, rich_enabled),
+    ):
+        if not _on:
+            continue
+        st.markdown(f"**{_label}** — stick side by side on the cylinder")
+        _sticker_buttons(
+            render_deco_gas_stickers(_go2, _ghe, _sw, 1.6, diver_name, _date_str),
+            f"{_label.split()[0].lower()}_{_stem(_go2, _ghe)}",
+        )
+    st.caption(
+        f"{STICKER_W}×{STICKER_H} px at {STICKER_DPI} dpi each. Deco gas MOD at ppO₂ 1.6 "
+        "(the switch depth); back/travel gas MOD at the bottom ppO₂ limit. "
+        "A minimum depth is shown for mixes that are hypoxic at the surface."
+    )
 
 
 # ─── Fill cost calculator ─────────────────────────────────────────────────────

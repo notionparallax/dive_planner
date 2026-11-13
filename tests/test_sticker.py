@@ -92,3 +92,33 @@ def test_overflow_warns():
     rows = [(f"{d}m", [sticker.Cell("999 (99)")] * 30) for d in range(30)]
     _, info = sticker.render_sticker([sticker.TitleItem("x")], headers, rows)
     assert not info["fits"] and info["warnings"]
+
+
+# ─── Cylinder stickers ────────────────────────────────────────────────────────
+def test_gas_kind_and_mix():
+    assert sticker.gas_kind_and_mix(50, 0) == ("NX", "50%")
+    assert sticker.gas_kind_and_mix(100, 0) == ("O2", "100%")
+    assert sticker.gas_kind_and_mix(21, 0) == ("AIR", "21%")
+    assert sticker.gas_kind_and_mix(18, 45) == ("TX", "18/45")
+    assert sticker.gas_kind_and_mix(2, 48, 50) == ("HX", "2/48/50")
+
+
+def test_min_operating_depth():
+    assert sticker.min_operating_depth(0.21) == 0
+    assert sticker.min_operating_depth(0.18) == 0
+    assert sticker.min_operating_depth(0.10) == 8
+
+
+def test_deco_gas_stickers_are_three_label_sized_images():
+    imgs = sticker.render_deco_gas_stickers(50, 0, 21, 1.6, "Diver", "13/11/26")
+    assert len(imgs) == 3
+    for im in imgs:
+        assert im.size == (sticker.STICKER_W, sticker.STICKER_H)
+        assert im.mode == "1"
+        assert min(im.getdata()) == 0
+
+
+def test_back_gas_sticker_renders_without_name():
+    im = sticker.render_back_gas_sticker(10, 50, 0, 129, 1.4, "", "13/11/26")
+    assert im.size == (sticker.STICKER_W, sticker.STICKER_H)
+    assert min(im.getdata()) == 0
