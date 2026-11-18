@@ -383,8 +383,12 @@ with st.sidebar:
     else:
         ascent_rate_profile = float(ascent_rate)
 
-    st.subheader("Descent Stop (S-drill)")
-    enable_stop = st.checkbox("Enable S-drill stop", value=_qpb("sdrill", False))
+    st.subheader("Extra stops")
+    enable_stop = st.checkbox(
+        "S-drill on descent",
+        value=_qpb("sdrill", False),
+        help="A planned stop on the way down, e.g. a shallow S-drill / bubble check.",
+    )
     descent_stops_tuple = None
     s_depth = _qpi("sd", 5)
     s_time = _qpi("st", 1)
@@ -409,13 +413,54 @@ with st.sidebar:
         )
         descent_stops_tuple = ((s_depth, s_time),)
 
-    # In travel mode, add a 1-min descent stop at h2_switch for the gas switch
+    # Ascent gas switches: a minimum stop, shown in the table. URL: gs_time=0 means off.
+    # Older URLs may carry a fractional value (the input used to step by 0.5).
+    _gs_url = max(0, int(round(_qpf("gs_time", 1.0))))
+    switch_stop_on = st.checkbox(
+        "Minimum stop at gas switches",
+        value=_gs_url > 0,
+        help=(
+            "Stop for at least this long at each gas switch on the way up, to get "
+            "the switch done calmly. If deco needs a longer stop there, the longer "
+            "time is used. A switch between the 3 m stops (e.g. EAN80 at 10 m) gets "
+            "its own stop; the deco stops stay on the 3 m grid."
+        ),
+    )
+    gs_time = 0
+    if switch_stop_on:
+        gs_time = int(
+            st.number_input(
+                "Minimum switch stop (min)",
+                min_value=1,
+                max_value=10,
+                value=max(1, _gs_url),
+                step=1,
+                key="gs_time_input",
+            )
+        )
+
+    # Descent gas switches only exist with a travel gas (H2 mode). URL: gs_desc=0 means off.
+    _gs_desc_url = max(0, _qpi("gs_desc", 0))
+    gs_desc_time = 0
     if _travel_mode:
-        tv_stop = (h2_switch, 1)
-        if descent_stops_tuple:
-            descent_stops_tuple = descent_stops_tuple + (tv_stop,)
-        else:
-            descent_stops_tuple = (tv_stop,)
+        desc_switch_on = st.checkbox(
+            "Pause at gas switches on descent",
+            value=_gs_desc_url > 0,
+            help="Off = switch on the fly on the way down.",
+        )
+        if desc_switch_on:
+            gs_desc_time = int(
+                st.number_input(
+                    "Descent switch pause (min)",
+                    min_value=1,
+                    max_value=10,
+                    value=max(1, _gs_desc_url),
+                    step=1,
+                    key="gs_desc_input",
+                )
+            )
+    else:
+        gs_desc_time = _gs_desc_url  # keep the URL value while the option is hidden
 
     st.subheader("Gas Consumption")
     col1, col2 = st.columns(2)
@@ -436,15 +481,6 @@ with st.sidebar:
             value=_qpi("sac_dec", 17),
             step=1,
         )
-    )
-    gs_time = st.number_input(
-        "Gas switch time (min)",
-        min_value=0.0,
-        max_value=5.0,
-        value=_qpf("gs_time", 1.0),
-        step=0.5,
-        key="gs_time_input",
-        help="Time paused at each gas switch depth. 0 = switch on the fly.",
     )
 
     # Read o2_narcotic early so Best Mix Calculator can use it; checkbox defined in Settings below.
@@ -609,6 +645,7 @@ _qp_updates = {
     "sac_bot": sac_bottom,
     "sac_dec": sac_deco,
     "gs_time": gs_time,
+    "gs_desc": gs_desc_time,
     "ppo2_bot": ppo2_bottom,
     "ppo2_ctol": ppo2_contingency_tol,
     "dens_lim": density_limit,
@@ -663,6 +700,7 @@ def _get_max_time(
     min_reserve=10,
     descent_stops=None,
     gas_switch_time=None,
+    descent_gas_switch_time=None,
     contingency_scenarios=None,
     travel_gas_config=None,
     lean_enabled=True,
@@ -692,6 +730,7 @@ def _get_max_time(
         min_reserve=min_reserve,
         descent_stops=descent_stops,
         gas_switch_time=gas_switch_time,
+        descent_gas_switch_time=descent_gas_switch_time,
         contingency_scenarios=[dict(s) for s in contingency_scenarios]
         if contingency_scenarios
         else None,
@@ -723,6 +762,7 @@ def _compute_scenarios(
     rich_switch,
     travel_gas_config=None,
     gas_switch_time=1.0,
+    descent_gas_switch_time=0,
     scenario_rows=None,
     lean_enabled=True,
     rich_enabled=True,
@@ -781,6 +821,7 @@ def _compute_scenarios(
                 descent_stops=descent_stops,
                 travel_gas_config=travel_gas_config,
                 gas_switch_time=gas_switch_time,
+                descent_gas_switch_time=descent_gas_switch_time,
             )
             r["infeasible"] = False
             r["infeasible_reason"] = ""
@@ -929,6 +970,7 @@ with st.spinner("Computing…"):
             min_gas_reserve,
             descent_stops=descent_stops_tuple,
             gas_switch_time=gs_time,
+            descent_gas_switch_time=gs_desc_time,
             contingency_scenarios=_contingency_specs,
             travel_gas_config=_tv_config,
             lean_enabled=lean_enabled,
@@ -959,6 +1001,7 @@ with st.spinner("Computing…"):
         rich_switch,
         travel_gas_config=_tv_config,
         gas_switch_time=gs_time,
+        descent_gas_switch_time=gs_desc_time,
         scenario_rows=_scenario_rows_cache,
         lean_enabled=lean_enabled,
         rich_enabled=rich_enabled,
@@ -1886,9 +1929,10 @@ The auto bottom time is found by running the main scenario with a long bottom ti
 
 Cross-check plans against Subsurface or your dive computer before use.
 
-Gas switching currently occurs only at deco stops, not during the free ascent from depth to
-first stop. Plans with deco gases are therefore slightly more conservative than Subsurface for
-the same inputs. ([known issue #45](https://github.com/notionparallax/decodaitengu/issues/45))
+Gas switches happen at each gas's own switch depth, including on the way up to the first stop.
+With **Minimum stop at gas switches** on, each switch is shown as a stop of at least that
+long (longer if deco needs it), so a switch above the first deco stop or between the 3 m stops
+(e.g. EAN80 at 10 m) appears as its own row in the table.
 
 This tool is for planning and comparison only.
 """)

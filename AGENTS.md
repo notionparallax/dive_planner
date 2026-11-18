@@ -18,7 +18,7 @@ c:\repos\dive_planner\
 ├── sticker.py            # Printable 80×50 mm thermal-label PNGs: plan table + cylinder mix labels (Pillow, no Streamlit)
 ├── fonts/                # Bundled fonts for sticker.py (DejaVu Sans Condensed, Noto Emoji; licences alongside)
 ├── tests/                # pytest — `.venv\Scripts\python.exe -m pytest tests`
-├── requirements.txt      # Production deps — keep decodaitengu>=1.4.0
+├── requirements.txt      # Production deps — keep decodaitengu>=1.5.0
 └── static/               # HTML/CSS/JS for FastAPI static mount
 ```
 
@@ -56,6 +56,8 @@ Also accepts:
 
 - `travel_gas_config=(o2, he, bar, vol, switch_depth)` — for hypoxic descent gas
 - `descent_stops=[(depth_m, time_min)]` — for S-drill pauses
+
+Also accepts `gas_switch_time` (minimum stop at each ascent switch, recorded in `stops`) and `descent_gas_switch_time` (descent switch pause; `None` = same as `gas_switch_time`, which is what the API/optimiser get — the Streamlit app passes it explicitly). Thread both through like `descent_stops`.
 
 **Important:** Must always pass `descent_stops` through — an earlier bug omitted this from `find_max_bottom_time`, causing the auto timer to ignore the S-drill. Fixed in commit `73770c2`.
 
@@ -159,7 +161,8 @@ Full list:
 | `st` | int | 1 | S-drill stop time (min) |
 | `sac_bot` | int | 20 | Bottom SAC (L/min) |
 | `sac_dec` | int | 17 | Deco SAC (L/min) |
-| `gs_time` | float | 1.0 | Gas switch pause (min) |
+| `gs_time` | int | 1 | Minimum stop at each ascent gas switch (min); 0 = off. Older URLs may hold a fraction — it's rounded |
+| `gs_desc` | int | 0 | Pause at each descent gas switch (min); 0 = off. Only shown in travel/H2 mode |
 | `ppo2_bot` | float | 1.4 | ppO2 bottom limit (bar) |
 | `ppo2_ctol` | float | 0.02 | Contingency ppO2 tolerance above limit |
 | `dens_lim` | float | 6.2 | Gas density warn threshold (g/L) |
@@ -197,7 +200,7 @@ The `o2_narc` URL param controls this. The checkbox is in the ⚙️ Settings ex
 
 ## The `decodaitengu` library
 
-**Package:** `decodaitengu` (pip name). Source at `c:\repos\decotengu\`. Must be `>=1.4.0` — `gas_switch_time` param was added in 1.4.0.
+**Package:** `decodaitengu` (pip name). Source at `c:\repos\decotengu\`. Must be `>=1.5.0` — 1.5.0 made `gas_switch_time` a minimum stop recorded in `stops` and added `descent_gas_switch_time`.
 
 **Primary imports:**
 
@@ -247,7 +250,7 @@ Use `powershell` with a here-string (`@'...'@`) + `Set-Content` for large file w
 
 ### 2. `decodaitengu` version on Streamlit Cloud
 
-Streamlit Cloud caches the environment. A version bump in `requirements.txt` only takes effect on the next rebuild. Always ensure `requirements.txt` says `decodaitengu>=1.4.0` or higher.
+Streamlit Cloud caches the environment. A version bump in `requirements.txt` only takes effect on the next rebuild. Always ensure `requirements.txt` says `decodaitengu>=1.5.0` or higher.
 
 ### 3. `descent_stops` must be passed everywhere
 

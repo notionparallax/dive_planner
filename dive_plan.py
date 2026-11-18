@@ -72,7 +72,8 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
                rich_gas=None, rich_switch=None, rich_enabled=True,
                descent_stops=None,
                travel_gas_config=None,
-               gas_switch_time=None):
+               gas_switch_time=None,
+               descent_gas_switch_time=None):
     """Run a decompression calculation and return a DiveSummary.
 
     Args:
@@ -80,6 +81,8 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
                                When provided, deco_gases_lost is ignored.
         back_gas: (o2, he) tuple; defaults to BACK_GAS_CYLINDER gas.
         descent_stops: list of (depth_m, time_min) stops during descent (e.g. S-drills).
+        gas_switch_time: minimum stop (min) at each ascent gas switch; recorded as a deco stop.
+        descent_gas_switch_time: pause (min) at each descent gas switch; None = gas_switch_time.
     """
     _gf_low = gf_low if gf_low is not None else GF_LOW
     _gf_high = gf_high if gf_high is not None else GF_HIGH
@@ -180,6 +183,7 @@ def run_profile(depth, bottom_time, deco_gases_lost=False,
         sac_deco=_sac_deco,
         descent_stops=descent_stops,
         gas_switch_time=_gas_switch_time,
+        descent_gas_switch_time=descent_gas_switch_time,
     )
 
 
@@ -259,6 +263,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
                  descent_stops=None,
                  travel_gas_config=None,
                  gas_switch_time=None,
+                 descent_gas_switch_time=None,
                  emergency_sac=None):
     """Run a complete scenario and return results dict.
 
@@ -337,6 +342,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             deco_cylinders=deco_cyl_objs,
             descent_stops=descent_stops,
             gas_switch_time=gas_switch_time if gas_switch_time is not None else 1.0,
+            descent_gas_switch_time=descent_gas_switch_time,
         )
 
         all_cylinders_list = [back_cyl] + ([c for c, _ in deco_cyls_with_depths] if deco_cyls_with_depths else [])
@@ -385,6 +391,7 @@ def run_scenario(name, depth, bottom_time, deco_gases_lost=False, cfg=None,
             descent_stops=descent_stops,
             travel_gas_config=travel_gas_config,
             gas_switch_time=gas_switch_time,
+            descent_gas_switch_time=descent_gas_switch_time,
         )
 
         back_usage = summary.gas_usage.get('back')
@@ -591,6 +598,7 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                         min_reserve=10,
                         descent_stops=None,
                         gas_switch_time=None,
+                        descent_gas_switch_time=None,
                         contingency_scenarios=None,
                         travel_gas_config=None):
     """
@@ -684,7 +692,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                      sac_bottom=s_sb, sac_deco=s_sd,
                                      descent_stops=descent_stops,
                                      travel_gas_config=travel_gas_config,
-                                     gas_switch_time=gas_switch_time)
+                                     gas_switch_time=gas_switch_time,
+                                     descent_gas_switch_time=descent_gas_switch_time)
                     if r['back_remaining_bar'] < min_reserve:
                         ok = False
                         break
@@ -710,7 +719,8 @@ def find_max_bottom_time(depth, back_gas=None, gas_rule='double_ascent',
                                  descent_rate=_descent_rate, ascent_rate=_ascent_rate,
                                  sac_bottom=_sac_bottom, sac_deco=_sac_deco,
                                  descent_stops=descent_stops,
-                                 gas_switch_time=gas_switch_time)
+                                 gas_switch_time=gas_switch_time,
+                                 descent_gas_switch_time=descent_gas_switch_time)
                 ok = r['min_gas']['bar_at_turn'] >= thirds_pressure
             if ok:
                 best = mid

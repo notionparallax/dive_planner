@@ -63,7 +63,7 @@ The **🖐️** marker on a column header shows the constraining scenario — th
 
 When "Auto bottom time" is enabled, the app binary-searches for the longest bottom time where all 8 contingency scenarios end with every cylinder above the **Minimum gas reserve** (default 10 bar). The reserve confirms the cylinder is not empty but is not counted as usable gas.
 
-Descent stops (S-drill), gas switch times, and SAC rate are all included in the search.
+Extra stops (S-drill, gas switch stops), and SAC rate are all included in the search.
 
 ---
 
@@ -87,14 +87,17 @@ An editable table with rows for Back gas, Lean deco gas, and Rich deco gas (plus
 - **Ascent (deep)**: default 10 m/min, from depth to 6m
 - **Ascent (shallow)**: default 3 m/min, 6m → surface
 
-### Descent stop (S-drill)
+### Extra stops
 
-Adds a pause during descent (depth and duration configurable), included in gas calculations and auto bottom time.
+- **S-drill on descent** (default off): a pause during descent (depth and duration configurable).
+- **Minimum stop at gas switches** (default on, 1 min): every gas switch on the way up becomes a stop of at least this many whole minutes, shown in the planning table. If deco needs longer at that depth, the longer time is used. A switch above the first deco stop (e.g. EAN50 at 21 m on a dive whose first stop is 12 m) or between the 3 m stops (e.g. EAN80 at 10 m) gets its own stop; deco stops stay on the 3 m grid.
+- **Pause at gas switches on descent** (default off, only shown with a travel gas): off means switching on the fly on the way down.
+
+All of these are included in gas calculations and auto bottom time.
 
 ### Gas consumption
 
 - **SAC bottom / SAC deco**: surface-equivalent consumption in L/min
-- **Gas switch time**: minutes paused at each deco switch depth (default 1 min)
 
 ### ⚙️ Settings
 
@@ -139,7 +142,8 @@ Every setting is encoded in the URL, making dive plans fully shareable. Key para
 | `dr`, `ar`, `ar_s` | Descent rate, deep/shallow ascent rates | 20, 10, 3.0 |
 | `sdrill`, `sd`, `st` | S-drill on/off, depth (m), time (min) | 0, 5, 1 |
 | `sac_bot`, `sac_dec` | Bottom and deco SAC (L/min) | 20, 17 |
-| `gs_time` | Gas switch pause (min) | 1.0 |
+| `gs_time` | Minimum stop at ascent gas switches (whole min, 0 = off) | 1 |
+| `gs_desc` | Pause at descent gas switches (whole min, 0 = off) | 0 |
 | `min_res` | Minimum gas reserve (bar) | 10 |
 | `o2_narc` | O₂ narcotic END model | 0 |
 
